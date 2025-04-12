@@ -10,3 +10,7 @@
 [submodule "app/src/main/jni/SDL_gfx"]
 	path = app/src/main/jni/SDL_gfx
 	url = https://github.com/StoddardOXC/SDL_gfx_SDL2
+[submodule "app/src/main/jni/OpenXcom"]
+	path = app/src/main/jni/OpenXcom
+	url = https://github.com/eithnahex/BrutalAI-OpenXcom
+	branch = android
