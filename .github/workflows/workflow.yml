@@ -12,21 +12,18 @@ jobs:
     runs-on: ubuntu-22.04
     
     steps:
-    - name: Checkout repository with submodules
-      run: |
-        echo "Клонируем репозиторий с сабмодулями..."
-        git clone --branch brutal-ai --recursive https://github.com/KSS675/openxcom-android.git
-        cd openxcom-android
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        ref: brutal-ai
         
-    - name: Configure Git submodule
+    - name: Configure Git submodule to android branch
       run: |
-        echo "Настраиваем сабмодуль на нужную ветку..."
-        cd openxcom-android
-        git submodule set-url OpenXcom https://github.com/KSS675/BrutalAI-OpenXcom.git
-        git submodule sync
-        git submodule update --init --remote --force
+        echo "Переключаем сабмодуль на ветку android..."
         cd OpenXcom
         git checkout android
+        git pull origin android
         cd ..
         
     - name: Set up JDK 8
@@ -66,7 +63,6 @@ jobs:
     - name: Create local.properties
       run: |
         echo "Создаем local.properties..."
-        cd openxcom-android
         echo "sdk.dir=$ANDROID_HOME" > local.properties
         echo "ndk.dir=$ANDROID_NDK_HOME" >> local.properties
         cat local.properties
@@ -74,18 +70,18 @@ jobs:
     - name: Configure build for arm64-v8a only
       run: |
         echo "Настраиваем сборку только для arm64-v8a..."
-        cd openxcom-android/app
+        cd app
         # Создаем gradle.properties для ограничения архитектур
         echo "android.useDeprecatedNdk=true" > gradle.properties
         echo "APP_ABI=arm64-v8a" >> gradle.properties
         
         # Модифицируем build.gradle для arm64 только
         sed -i '/ndk {/!b;n;c\            abiFilters "arm64-v8a"' build.gradle || true
+        cd ..
         
     - name: Build with Gradle 4.10.3
       run: |
         echo "Собираем APK с Gradle 4.10.3..."
-        cd openxcom-android
         
         # Устанавливаем конкретную версию Gradle wrapper
         sed -i 's/gradle-.*-bin.zip/gradle-4.10.3-bin.zip/' gradle/wrapper/gradle-wrapper.properties
@@ -100,10 +96,10 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: BrutalAI-Android-APK
-        path: openxcom-android/app/build/outputs/apk/release/*.apk
+        path: app/build/outputs/apk/release/*.apk
         retention-days: 7
         
     - name: List build outputs
       run: |
         echo "Собранные файлы:"
-        find openxcom-android -name "*.apk" -type f | xargs ls -la
+        find . -name "*.apk" -type f | xargs ls -la
