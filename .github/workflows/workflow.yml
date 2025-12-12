@@ -89,12 +89,22 @@ jobs:
         echo "    (void)y;" >> src/Engine/sdl_compat.h
         echo "}" >> src/Engine/sdl_compat.h
         echo "" >> src/Engine/sdl_compat.h
-        echo "static inline Uint8 SDL_GetMouseState(int* x, int* y)" >> src/Engine/sdl_compat.h
+        echo "static inline void SDL_WarpMouse(int x, int y)" >> src/Engine/sdl_compat.h
         echo "{" >> src/Engine/sdl_compat.h
-        echo "    // В SDL2 используем SDL_GetMouseState с другим API" >> src/Engine/sdl_compat.h
-        echo "    Uint32 buttons = SDL_GetMouseState(x, y);" >> src/Engine/sdl_compat.h
-        echo "    // Конвертируем кнопки если нужно" >> src/Engine/sdl_compat.h
-        echo "    return (Uint8)buttons;" >> src/Engine/sdl_compat.h
+        echo "    // В SDL2 используем SDL_WarpMouseInWindow" >> src/Engine/sdl_compat.h
+        echo "    SDL_Window* window = SDL_GetMouseFocus();" >> src/Engine/sdl_compat.h
+        echo "    if (window) {" >> src/Engine/sdl_compat.h
+        echo "        SDL_WarpMouseInWindow(window, x, y);" >> src/Engine/sdl_compat.h
+        echo "    }" >> src/Engine/sdl_compat.h
+        echo "}" >> src/Engine/sdl_compat.h
+        echo "" >> src/Engine/sdl_compat.h
+        echo "static inline Uint8 SDL_GetMouseState(int* x, int* y, Uint8* buttons)" >> src/Engine/sdl_compat.h
+        echo "{" >> src/Engine/sdl_compat.h
+        echo "    Uint32 state = SDL_GetMouseState(x, y);" >> src/Engine/sdl_compat.h
+        echo "    if (buttons) {" >> src/Engine/sdl_compat.h
+        echo "        *buttons = (Uint8)state;" >> src/Engine/sdl_compat.h
+        echo "    }" >> src/Engine/sdl_compat.h
+        echo "    return (Uint8)state;" >> src/Engine/sdl_compat.h
         echo "}" >> src/Engine/sdl_compat.h
         echo "" >> src/Engine/sdl_compat.h
         echo "// SDL 1.2 использовал SDL_GetKeyState, в SDL2 это SDL_GetKeyboardState" >> src/Engine/sdl_compat.h
@@ -124,31 +134,50 @@ jobs:
         echo "" >> src/Engine/sdl_compat.h
         echo "#endif // SDL_COMPAT_H" >> src/Engine/sdl_compat.h
         
-        echo "2. Поиск и исправление файлов с SDL1 зависимостями..."
+        echo "2. Исправляем опечатки и заменяем SDL1 типы..."
+        echo "2.1. Заменяем SDLKey на int..."
+        find . -type f \( -name "*.h" -o -name "*.cpp" -o -name "*.c" \) -exec sed -i 's/\bSDLKey\b/int/g' {} \;
         
-        echo "Ищем все файлы с SDLKey и заменяем на int..."
-        find . -type f \( -name "*.h" -o -name "*.cpp" -o -name "*.c" \) -exec grep -l "SDLKey" {} \; | while read file; do
-            echo "Исправляю SDLKey в $file"
-            sed -i 's/\bSDLKey\b/int/g' "$file"
-        done
+        echo "2.2. Заменяем SDLMod на int..."
+        find . -type f \( -name "*.h" -o -name "*.cpp" -o -name "*.c" \) -exec sed -i 's/\bSDLMod\b/int/g' {} \;
         
-        echo "Ищем все файлы с SDLMod и заменяем на int..."
-        find . -type f \( -name "*.h" -o -name "*.cpp" -o -name "*.c" \) -exec grep -l "SDLMod" {} \; | while read file; do
-            echo "Исправляю SDLMod в $file"
-            sed -i 's/\bSDLMod\b/int/g' "$file"
-        done
-        
-        echo "Заменяем SDL_BUTTON_WHEELDOWN и SDL_BUTTON_WHEELUP на числовые значения..."
+        echo "2.3. Заменяем SDL_BUTTON_WHEELDOWN и SDL_BUTTON_WHEELUP на числовые значения..."
         find . -type f \( -name "*.h" -o -name "*.cpp" -o -name "*.c" \) -exec sed -i 's/SDL_BUTTON_WHEELDOWN/4/g; s/SDL_BUTTON_WHEELUP/5/g' {} \;
         
-        echo "Исправляем SDL_GetMouseState вызовы..."
-        find . -type f \( -name "*.cpp" -o -name "*.c" \) -exec sed -i 's/SDL_GetMouseState(&\([^)]*\))/SDL_GetMouseState(\&\1, NULL)/g' {} \;
+        echo "2.4. Исправляем опечатку Unit16 на Uint16..."
+        find . -type f \( -name "*.h" -o -name "*.cpp" -o -name "*.c" \) -exec sed -i 's/\bUnit16\b/Uint16/g' {} \;
         
-        echo "3. Проверяем файлы, использующие SDL_MapMouse..."
+        echo "3. Исправляем конкретные файлы с ошибками..."
+        
+        echo "3.1. Исправляем Game.cpp..."
+        if [ -f "src/Engine/Game.cpp" ]; then
+            echo "Исправляем строку 187: SDL_GetMouseState(&x, &y, NULL)..."
+            sed -i '187s/SDL_GetMouseState(&x, &y, NULL)/SDL_GetMouseState(&x, &y)/' src/Engine/Game.cpp
+            
+            echo "Исправляем атрибуты fallthrough..."
+            sed -i 's/\[\[gnu::fallthrough\]\]/\/\/ fallthrough/g' src/Engine/Game.cpp
+            
+            echo "Добавляем include sdl_compat.h..."
+            if ! grep -q "#include.*sdl_compat\.h" src/Engine/Game.cpp; then
+                sed -i '/#include ".*\.h"/a #include "sdl_compat.h"' src/Engine/Game.cpp
+            fi
+        fi
+        
+        echo "3.2. Исправляем ResearchState.cpp..."
+        if [ -f "src/Basescape/ResearchState.cpp" ]; then
+            echo "Исправляем строки с SDL_WarpMouse..."
+            sed -i 's/Unit16/Uint16/g' src/Basescape/ResearchState.cpp
+            
+            echo "Добавляем include sdl_compat.h..."
+            if ! grep -q "#include.*sdl_compat\.h" src/Basescape/ResearchState.cpp; then
+                sed -i '/#include ".*\.h"/a #include "Engine/sdl_compat.h"' src/Basescape/ResearchState.cpp
+            fi
+        fi
+        
+        echo "4. Добавляем include sdl_compat.h в другие файлы, которые могут использовать SDL1 функции..."
+        echo "4.1. Ищем файлы с SDL_MapMouse..."
         MAPMOUSE_FILES=$(find . -type f \( -name "*.cpp" -o -name "*.c" \) -exec grep -l "SDL_MapMouse" {} \; 2>/dev/null || true)
-        
         for file in $MAPMOUSE_FILES; do
-            echo "Найден SDL_MapMouse в $file"
             if ! grep -q "#include.*sdl_compat\.h" "$file"; then
                 if [[ "$file" == src/Engine/* ]]; then
                     sed -i '/#include.*\.h"/a #include "sdl_compat.h"' "$file"
@@ -158,9 +187,42 @@ jobs:
             fi
         done
         
-        echo "4. Проверяем и исправляем rapidyaml проблемы..."
+        echo "4.2. Ищем файлы с SDL_WarpMouse..."
+        WARPMOUSE_FILES=$(find . -type f \( -name "*.cpp" -o -name "*.c" \) -exec grep -l "SDL_WarpMouse" {} \; 2>/dev/null || true)
+        for file in $WARPMOUSE_FILES; do
+            if ! grep -q "#include.*sdl_compat\.h" "$file"; then
+                if [[ "$file" == src/Engine/* ]]; then
+                    sed -i '/#include.*\.h"/a #include "sdl_compat.h"' "$file"
+                else
+                    sed -i '/#include.*\.h"/a #include "Engine/sdl_compat.h"' "$file"
+                fi
+            fi
+        done
+        
+        echo "4.3. Ищем файлы с SDL_GetMouseState..."
+        GETMOUSE_FILES=$(find . -type f \( -name "*.cpp" -o -name "*.c" \) -exec grep -l "SDL_GetMouseState" {} \; 2>/dev/null || true)
+        for file in $GETMOUSE_FILES; do
+            if ! grep -q "#include.*sdl_compat\.h" "$file"; then
+                if [[ "$file" == src/Engine/* ]]; then
+                    sed -i '/#include.*\.h"/a #include "sdl_compat.h"' "$file"
+                else
+                    sed -i '/#include.*\.h"/a #include "Engine/sdl_compat.h"' "$file"
+                fi
+            fi
+        done
+        
+        echo "5. Ищем другие SDL1 функции и исправляем..."
+        echo "5.1. Ищем файлы с атрибутами [[gnu::fallthrough]]..."
+        find . -type f \( -name "*.cpp" -o -name "*.c" -o -name "*.h" \) -exec grep -l "gnu::fallthrough" {} \; 2>/dev/null | while read file; do
+            sed -i 's/\[\[gnu::fallthrough\]\]/\/\/ fallthrough/g' "$file"
+        done
+        
+        echo "5.2. Исправляем SDL_GetMouseState с тремя аргументами в других файлах..."
+        find . -type f \( -name "*.cpp" -o -name "*.c" \) -exec sed -i 's/SDL_GetMouseState(\([^,]*\), \([^,]*\), NULL)/SDL_GetMouseState(\1, \2)/g' {} \;
+        
+        echo "6. Проверяем rapidyaml..."
         if grep -r "ryml" src/ 2>/dev/null | grep -q "error"; then
-            echo "Найдены проблемы с rapidyaml, исправляем..."
+            echo "Добавляем rapidyaml includes..."
             find src/ -name "*.cpp" -type f -exec grep -l "ryml" {} \; | while read file; do
                 if ! grep -q "#include.*ryml" "$file"; then
                     echo "Добавляем rapidyaml include в $file"
@@ -169,17 +231,98 @@ jobs:
             done
         fi
         
-        echo "5. Проверяем другие возможные SDL1 зависимости..."
-        SDL1_CALLS=("SDL_GetKeyState" "SDL_EnableUNICODE" "SDL_EnableKeyRepeat" "SDL_WM_GrabInput")
-        for call in "${SDL1_CALLS[@]}"; do
-            FILES_WITH_CALL=$(find . -type f \( -name "*.cpp" -o -name "*.c" -o -name "*.h" \) -exec grep -l "$call" {} \; 2>/dev/null || true)
-            if [ -n "$FILES_WITH_CALL" ]; then
-                echo "Внимание: найден SDL1 вызов $call в:"
-                echo "$FILES_WITH_CALL"
-            fi
-        done
-        
         cd ../../../../../
+    
+    - name: "Force ARM64 only in build configuration"
+      run: |
+        echo "=== ПРИНУДИТЕЛЬНАЯ НАСТРОЙКА ТОЛЬКО ARM64 ==="
+        
+        echo "1. Очищаем кэш CMake..."
+        rm -rf app/.cxx app/build app/CMakeFiles 2>/dev/null || true
+        
+        echo "2. Настраиваем CMakeLists.txt для только arm64-v8a..."
+        if [ -f "app/CMakeLists.txt" ]; then
+            echo "Устанавливаем только arm64-v8a архитектуру..."
+            # Удаляем все упоминания других архитектур
+            sed -i 's/armeabi-v7a//g' app/CMakeLists.txt
+            sed -i 's/x86//g' app/CMakeLists.txt
+            sed -i 's/x86_64//g' app/CMakeLists.txt
+            # Устанавливаем только arm64-v8a
+            sed -i 's/set(ANDROID_ABI .*)/set(ANDROID_ABI "arm64-v8a")/g' app/CMakeLists.txt
+            
+            # Добавляем явные настройки для arm64
+            echo "" >> app/CMakeLists.txt
+            echo "# Принудительная настройка только для ARM64" >> app/CMakeLists.txt
+            echo "set(CMAKE_ANDROID_ARCH_ABI arm64-v8a)" >> app/CMakeLists.txt
+            echo "set(ANDROID_ABI arm64-v8a)" >> app/CMakeLists.txt
+            echo "set(CMAKE_ANDROID_ARM_MODE arm)" >> app/CMakeLists.txt
+            echo "set(CMAKE_ANDROID_ARM_NEON TRUE)" >> app/CMakeLists.txt
+            echo "set(CMAKE_CXX_FLAGS \"\${CMAKE_CXX_FLAGS} -D__arm64__\")" >> app/CMakeLists.txt
+        fi
+        
+        echo "3. Настраиваем build.gradle для только arm64..."
+        if [ -f "app/build.gradle" ]; then
+            echo "Устанавливаем ndkVersion и abiFilters..."
+            
+            # Устанавливаем версию NDK
+            if grep -q "ndkVersion" app/build.gradle; then
+                sed -i 's/ndkVersion .*/ndkVersion "18.1.5063045"/g' app/build.gradle
+            else
+                # Вставляем после android {
+                sed -i '/android {/a\    ndkVersion "18.1.5063045"' app/build.gradle
+            fi
+            
+            # Устанавливаем только arm64-v8a
+            if grep -q "abiFilters" app/build.gradle; then
+                sed -i 's/abiFilters .*/abiFilters "arm64-v8a"/g' app/build.gradle
+            else
+                # Добавляем в defaultConfig
+                sed -i '/defaultConfig {/,/}/ {
+                    /versionName/ a\
+        ndk {
+            abiFilters "arm64-v8a"
+        }
+                }' app/build.gradle
+            fi
+            
+            # Добавляем аргументы для CMake
+            echo "Добавляем аргументы CMake..."
+            sed -i '/externalNativeBuild {/,/}/ {
+                /cmake {/,/}/ s/arguments/arguments "-DANDROID_ABI=arm64-v8a" "-DANDROID_ARM_MODE=arm" "-DANDROID_ARM_NEON=TRUE"/
+            }' app/build.gradle
+            
+            # Отключаем оптимизации для отладки
+            sed -i 's/minifyEnabled true/minifyEnabled false/g' app/build.gradle
+            sed -i 's/shrinkResources true/shrinkResources false/g' app/build.gradle
+            sed -i 's/debuggable false/debuggable true/g' app/build.gradle
+        fi
+        
+        echo "4. Создаем local.properties с правильными путями..."
+        echo "sdk.dir=/home/runner/android-sdk" > local.properties
+        echo "ndk.dir=/home/runner/android-sdk/ndk/18.1.5063045" >> local.properties
+        
+        echo "5. Создаем gradle.properties..."
+        echo "org.gradle.jvmargs=-Xmx4g" > gradle.properties
+        echo "android.useAndroidX=true" >> gradle.properties
+        echo "android.enableJetifier=true" >> gradle.properties
+        echo "android.enableR8=false" >> gradle.properties
+        
+        echo "6. Устанавливаем gradle wrapper 4.10.3..."
+        echo "distributionUrl=https\://services.gradle.org/distributions/gradle-4.10.3-all.zip" > gradle/wrapper/gradle-wrapper.properties
+        
+        echo "7. Даем права на выполнение gradlew..."
+        chmod +x gradlew
+        
+        echo "8. Проверяем конфигурацию..."
+        echo "=== ПРОВЕРКА КОНФИГУРАЦИИ ==="
+        echo "local.properties:"
+        cat local.properties
+        echo ""
+        echo "gradle.properties:"
+        cat gradle.properties
+        echo ""
+        echo "gradle-wrapper.properties:"
+        cat gradle/wrapper/gradle-wrapper.properties
     
     - name: Setup Java 8
       uses: actions/setup-java@v4
@@ -219,47 +362,8 @@ jobs:
         
         cd $GITHUB_WORKSPACE
         
-        echo "sdk.dir=/home/runner/android-sdk" > local.properties
-        echo "ndk.dir=/home/runner/android-sdk/ndk/18.1.5063045" >> local.properties
-        
-        echo "local.properties создан:"
-        cat local.properties
-    
-    - name: "Configure build for ARM64 only"
-      run: |
-        echo "=== Настройка сборки только для ARM64 ==="
-        
-        if [ -f "app/build.gradle" ]; then
-          echo "Настройка build.gradle..."
-          
-          sed -i '/android {/,/}/ {
-            /compileSdkVersion/ a\    ndkVersion "18.1.5063045"
-          }' app/build.gradle
-          
-          sed -i '/defaultConfig {/,/}/ {
-            /ndk {/,/}/ {
-              s/abiFilters.*/abiFilters "arm64-v8a"/
-            }
-          }' app/build.gradle
-          
-          sed -i 's/minifyEnabled true/minifyEnabled false/g' app/build.gradle
-          sed -i 's/shrinkResources true/shrinkResources false/g' app/build.gradle
-        fi
-        
-        if [ -f "app/CMakeLists.txt" ]; then
-          sed -i 's/set(ANDROID_ABI "armeabi-v7a arm64-v8a x86 x86_64")/set(ANDROID_ABI "arm64-v8a")/g' app/CMakeLists.txt
-        fi
-        
-        echo "Создаем gradle.properties..."
-        echo "org.gradle.jvmargs=-Xmx4g" > gradle.properties
-        echo "android.useAndroidX=true" >> gradle.properties
-        echo "android.enableJetifier=true" >> gradle.properties
-        echo "android.enableR8=false" >> gradle.properties
-        
-        echo "Обновляем gradle wrapper..."
-        echo "distributionUrl=https\://services.gradle.org/distributions/gradle-4.10.3-all.zip" > gradle/wrapper/gradle-wrapper.properties
-        
-        chmod +x gradlew
+        echo "Проверка установки NDK..."
+        ls -la /home/runner/android-sdk/ndk/
     
     - name: "Build APK"
       run: |
@@ -267,10 +371,14 @@ jobs:
         
         echo "Проверка структуры проекта..."
         ls -la
+        echo "app директория:"
+        ls -la app/
         
         echo "Проверка подмодулей..."
         if [ -d "app/src/main/jni/OpenXcom" ]; then
           echo "Подмодуль OpenXcom найден"
+          echo "Проверяем исправления в Game.cpp:"
+          grep -n "SDL_GetMouseState" app/src/main/jni/OpenXcom/src/Engine/Game.cpp || echo "Не найден"
         else
           echo "❌ Подмодуль OpenXcom не найден!"
           exit 1
@@ -279,7 +387,7 @@ jobs:
         echo "Очистка проекта..."
         ./gradlew clean --stacktrace || echo "Предупреждение: очистка не удалась полностью"
         
-        echo "Сборка debug APK..."
+        echo "Сборка debug APK (только arm64)..."
         ./gradlew assembleDebug --stacktrace --info
         
         echo "Проверка результатов сборки..."
@@ -287,18 +395,32 @@ jobs:
           echo "✅ СБОРКА УСПЕШНА!"
           echo "APK размер: $(du -h app/build/outputs/apk/debug/app-debug.apk | cut -f1)"
           
+          echo "Создаем артефакт..."
           mkdir -p output
-          cp app/build/outputs/apk/debug/app-debug.apk output/
-          ls -la output/
-        else
-          echo "❌ Сборка не удалась! Проверяем логи..."
+          cp app/build/outputs/apk/debug/app-debug.apk output/brutal-ai-android-arm64.apk
           
+          echo "Информация о APK:"
+          ls -la output/
+          echo ""
+          echo "Содержимое APK (архитектуры):"
+          unzip -l output/brutal-ai-android-arm64.apk | grep lib/ || echo "Библиотеки не найдены"
+        else
+          echo "❌ Сборка не удалась!"
+          
+          echo "Ищем файлы с ошибками..."
           find . -name "*.log" -type f | head -10 | while read log; do
             echo "=== Лог файл: $log ==="
-            tail -100 "$log"
+            tail -50 "$log" | grep -i "error\|fail\|undefined" || echo "Ошибки не найдены"
           done
           
-          ./gradlew build --stacktrace 2>&1 | tail -200
+          echo "Проверяем build.gradle..."
+          cat app/build.gradle | grep -A5 -B5 "abi\|ndk\|abiFilters"
+          
+          echo "Проверяем CMakeLists.txt..."
+          cat app/CMakeLists.txt | grep -i "abi\|arch\|arm"
+          
+          echo "Последние 100 строк вывода сборки:"
+          tail -100 build.log 2>/dev/null || echo "Файл build.log не найден"
           
           exit 1
         fi
@@ -307,5 +429,5 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: BrutalAI-Android-ARM64
-        path: output/app-debug.apk
+        path: output/brutal-ai-android-arm64.apk
         retention-days: 7
