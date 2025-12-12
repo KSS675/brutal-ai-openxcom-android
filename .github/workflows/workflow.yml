@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-20.04
     timeout-minutes: 60
     
     steps:
@@ -134,7 +134,7 @@ jobs:
         echo "" >> src/Engine/sdl_compat.h
         echo "#endif // SDL_COMPAT_H" >> src/Engine/sdl_compat.h
         
-        echo "2. Исправляем опечатки и заменяем SDL1 типы..."
+        echo "2. Поиск и исправление файлов с SDL1 зависимостями..."
         echo "2.1. Заменяем SDLKey на int..."
         find . -type f \( -name "*.h" -o -name "*.cpp" -o -name "*.c" \) -exec sed -i 's/\bSDLKey\b/int/g' {} \;
         
@@ -148,7 +148,6 @@ jobs:
         find . -type f \( -name "*.h" -o -name "*.cpp" -o -name "*.c" \) -exec sed -i 's/\bUnit16\b/Uint16/g' {} \;
         
         echo "3. Исправляем конкретные файлы с ошибками..."
-        
         echo "3.1. Исправляем Game.cpp..."
         if [ -f "src/Engine/Game.cpp" ]; then
             echo "Исправляем строку 187: SDL_GetMouseState(&x, &y, NULL)..."
@@ -174,9 +173,10 @@ jobs:
             fi
         fi
         
-        echo "4. Добавляем include sdl_compat.h в другие файлы, которые могут использовать SDL1 функции..."
+        echo "4. Добавляем include sdl_compat.h в другие файлы..."
         echo "4.1. Ищем файлы с SDL_MapMouse..."
         MAPMOUSE_FILES=$(find . -type f \( -name "*.cpp" -o -name "*.c" \) -exec grep -l "SDL_MapMouse" {} \; 2>/dev/null || true)
+        
         for file in $MAPMOUSE_FILES; do
             if ! grep -q "#include.*sdl_compat\.h" "$file"; then
                 if [[ "$file" == src/Engine/* ]]; then
@@ -189,6 +189,7 @@ jobs:
         
         echo "4.2. Ищем файлы с SDL_WarpMouse..."
         WARPMOUSE_FILES=$(find . -type f \( -name "*.cpp" -o -name "*.c" \) -exec grep -l "SDL_WarpMouse" {} \; 2>/dev/null || true)
+        
         for file in $WARPMOUSE_FILES; do
             if ! grep -q "#include.*sdl_compat\.h" "$file"; then
                 if [[ "$file" == src/Engine/* ]]; then
@@ -201,6 +202,7 @@ jobs:
         
         echo "4.3. Ищем файлы с SDL_GetMouseState..."
         GETMOUSE_FILES=$(find . -type f \( -name "*.cpp" -o -name "*.c" \) -exec grep -l "SDL_GetMouseState" {} \; 2>/dev/null || true)
+        
         for file in $GETMOUSE_FILES; do
             if ! grep -q "#include.*sdl_compat\.h" "$file"; then
                 if [[ "$file" == src/Engine/* ]]; then
@@ -211,118 +213,10 @@ jobs:
             fi
         done
         
-        echo "5. Ищем другие SDL1 функции и исправляем..."
-        echo "5.1. Ищем файлы с атрибутами [[gnu::fallthrough]]..."
-        find . -type f \( -name "*.cpp" -o -name "*.c" -o -name "*.h" \) -exec grep -l "gnu::fallthrough" {} \; 2>/dev/null | while read file; do
-            sed -i 's/\[\[gnu::fallthrough\]\]/\/\/ fallthrough/g' "$file"
-        done
-        
-        echo "5.2. Исправляем SDL_GetMouseState с тремя аргументами в других файлах..."
-        find . -type f \( -name "*.cpp" -o -name "*.c" \) -exec sed -i 's/SDL_GetMouseState(\([^,]*\), \([^,]*\), NULL)/SDL_GetMouseState(\1, \2)/g' {} \;
-        
-        echo "6. Проверяем rapidyaml..."
-        if grep -r "ryml" src/ 2>/dev/null | grep -q "error"; then
-            echo "Добавляем rapidyaml includes..."
-            find src/ -name "*.cpp" -type f -exec grep -l "ryml" {} \; | while read file; do
-                if ! grep -q "#include.*ryml" "$file"; then
-                    echo "Добавляем rapidyaml include в $file"
-                    sed -i '1i #include "ryml.hpp"' "$file"
-                fi
-            done
-        fi
+        echo "5. Исправляем другие fallthrough атрибуты..."
+        find . -type f \( -name "*.cpp" -o -name "*.c" -o -name "*.h" \) -exec sed -i 's/\[\[gnu::fallthrough\]\]/\/\/ fallthrough/g' {} \;
         
         cd ../../../../../
-    
-    - name: "Force ARM64 only in build configuration"
-      run: |
-        echo "=== ПРИНУДИТЕЛЬНАЯ НАСТРОЙКА ТОЛЬКО ARM64 ==="
-        
-        echo "1. Очищаем кэш CMake..."
-        rm -rf app/.cxx app/build app/CMakeFiles 2>/dev/null || true
-        
-        echo "2. Настраиваем CMakeLists.txt для только arm64-v8a..."
-        if [ -f "app/CMakeLists.txt" ]; then
-            echo "Устанавливаем только arm64-v8a архитектуру..."
-            # Удаляем все упоминания других архитектур
-            sed -i 's/armeabi-v7a//g' app/CMakeLists.txt
-            sed -i 's/x86//g' app/CMakeLists.txt
-            sed -i 's/x86_64//g' app/CMakeLists.txt
-            # Устанавливаем только arm64-v8a
-            sed -i 's/set(ANDROID_ABI .*)/set(ANDROID_ABI "arm64-v8a")/g' app/CMakeLists.txt
-            
-            # Добавляем явные настройки для arm64
-            echo "" >> app/CMakeLists.txt
-            echo "# Принудительная настройка только для ARM64" >> app/CMakeLists.txt
-            echo "set(CMAKE_ANDROID_ARCH_ABI arm64-v8a)" >> app/CMakeLists.txt
-            echo "set(ANDROID_ABI arm64-v8a)" >> app/CMakeLists.txt
-            echo "set(CMAKE_ANDROID_ARM_MODE arm)" >> app/CMakeLists.txt
-            echo "set(CMAKE_ANDROID_ARM_NEON TRUE)" >> app/CMakeLists.txt
-            echo "set(CMAKE_CXX_FLAGS \"\${CMAKE_CXX_FLAGS} -D__arm64__\")" >> app/CMakeLists.txt
-        fi
-        
-        echo "3. Настраиваем build.gradle для только arm64..."
-        if [ -f "app/build.gradle" ]; then
-            echo "Устанавливаем ndkVersion и abiFilters..."
-            
-            # Устанавливаем версию NDK
-            if grep -q "ndkVersion" app/build.gradle; then
-                sed -i 's/ndkVersion .*/ndkVersion "18.1.5063045"/g' app/build.gradle
-            else
-                # Вставляем после android {
-                sed -i '/android {/a\    ndkVersion "18.1.5063045"' app/build.gradle
-            fi
-            
-            # Устанавливаем только arm64-v8a
-            if grep -q "abiFilters" app/build.gradle; then
-                sed -i 's/abiFilters .*/abiFilters "arm64-v8a"/g' app/build.gradle
-            else
-                # Добавляем в defaultConfig
-                sed -i '/defaultConfig {/,/}/ {
-                    /versionName/ a\
-        ndk {
-            abiFilters "arm64-v8a"
-        }
-                }' app/build.gradle
-            fi
-            
-            # Добавляем аргументы для CMake
-            echo "Добавляем аргументы CMake..."
-            sed -i '/externalNativeBuild {/,/}/ {
-                /cmake {/,/}/ s/arguments/arguments "-DANDROID_ABI=arm64-v8a" "-DANDROID_ARM_MODE=arm" "-DANDROID_ARM_NEON=TRUE"/
-            }' app/build.gradle
-            
-            # Отключаем оптимизации для отладки
-            sed -i 's/minifyEnabled true/minifyEnabled false/g' app/build.gradle
-            sed -i 's/shrinkResources true/shrinkResources false/g' app/build.gradle
-            sed -i 's/debuggable false/debuggable true/g' app/build.gradle
-        fi
-        
-        echo "4. Создаем local.properties с правильными путями..."
-        echo "sdk.dir=/home/runner/android-sdk" > local.properties
-        echo "ndk.dir=/home/runner/android-sdk/ndk/18.1.5063045" >> local.properties
-        
-        echo "5. Создаем gradle.properties..."
-        echo "org.gradle.jvmargs=-Xmx4g" > gradle.properties
-        echo "android.useAndroidX=true" >> gradle.properties
-        echo "android.enableJetifier=true" >> gradle.properties
-        echo "android.enableR8=false" >> gradle.properties
-        
-        echo "6. Устанавливаем gradle wrapper 4.10.3..."
-        echo "distributionUrl=https\://services.gradle.org/distributions/gradle-4.10.3-all.zip" > gradle/wrapper/gradle-wrapper.properties
-        
-        echo "7. Даем права на выполнение gradlew..."
-        chmod +x gradlew
-        
-        echo "8. Проверяем конфигурацию..."
-        echo "=== ПРОВЕРКА КОНФИГУРАЦИИ ==="
-        echo "local.properties:"
-        cat local.properties
-        echo ""
-        echo "gradle.properties:"
-        cat gradle.properties
-        echo ""
-        echo "gradle-wrapper.properties:"
-        cat gradle/wrapper/gradle-wrapper.properties
     
     - name: Setup Java 8
       uses: actions/setup-java@v4
@@ -362,12 +256,82 @@ jobs:
         
         cd $GITHUB_WORKSPACE
         
-        echo "Проверка установки NDK..."
-        ls -la /home/runner/android-sdk/ndk/
+        echo "sdk.dir=/home/runner/android-sdk" > local.properties
+        echo "ndk.dir=/home/runner/android-sdk/ndk/18.1.5063045" >> local.properties
+        
+        echo "local.properties создан:"
+        cat local.properties
+    
+    - name: "Fix and configure for ARM64"
+      run: |
+        echo "=== НАСТРОЙКА СБОРКИ ТОЛЬКО ДЛЯ ARM64 ==="
+        
+        echo "1. Восстанавливаем оригинальный build.gradle..."
+        git checkout HEAD -- app/build.gradle 2>/dev/null || echo "Не удалось восстановить build.gradle"
+        
+        echo "2. Исправляем build.gradle..."
+        if [ -f "app/build.gradle" ]; then
+            echo "Добавляем ndkVersion..."
+            if ! grep -q "ndkVersion" app/build.gradle; then
+                sed -i '/android {/a\    ndkVersion "18.1.5063045"' app/build.gradle
+            else
+                sed -i 's/ndkVersion .*/ndkVersion "18.1.5063045"/g' app/build.gradle
+            fi
+            
+            echo "Добавляем abiFilters только для arm64-v8a..."
+            if grep -q "abiFilters" app/build.gradle; then
+                sed -i 's/abiFilters .*/abiFilters "arm64-v8a"/g' app/build.gradle
+            else
+                sed -i '/defaultConfig {/,/}/ {
+                    /versionName/ a\
+        ndk {
+            abiFilters "arm64-v8a"
+        }
+                }' app/build.gradle
+            fi
+            
+            echo "Отключаем минификацию..."
+            sed -i 's/minifyEnabled true/minifyEnabled false/g' app/build.gradle
+            sed -i 's/shrinkResources true/shrinkResources false/g' app/build.gradle
+            
+            echo "Проверяем, нет ли ошибок в синтаксисе..."
+            # Проверяем строку 35 (где была ошибка)
+            if [ -n "$(sed -n '35p' app/build.gradle | grep 'UE\|AMDR0')" ]; then
+                echo "Исправляем строку 35..."
+                sed -i '35s/.*/            arguments "-DANDROID_ABI=arm64-v8a", "-DANDROID_STL=c++_static"/' app/build.gradle
+            fi
+        fi
+        
+        echo "3. Исправляем CMakeLists.txt..."
+        if [ -f "app/CMakeLists.txt" ]; then
+            sed -i 's/set(ANDROID_ABI "armeabi-v7a arm64-v8a x86 x86_64")/set(ANDROID_ABI "arm64-v8a")/g' app/CMakeLists.txt
+            sed -i 's/armeabi-v7a arm64-v8a x86 x86_64/arm64-v8a/g' app/CMakeLists.txt
+            echo "" >> app/CMakeLists.txt
+            echo "# Принудительно устанавливаем только ARM64" >> app/CMakeLists.txt
+            echo "set(CMAKE_ANDROID_ARCH_ABI arm64-v8a)" >> app/CMakeLists.txt
+        fi
+        
+        echo "4. Создаем gradle.properties..."
+        echo "org.gradle.jvmargs=-Xmx4g" > gradle.properties
+        echo "android.useAndroidX=true" >> gradle.properties
+        echo "android.enableJetifier=true" >> gradle.properties
+        echo "android.enableR8=false" >> gradle.properties
+        
+        echo "5. Обновляем gradle wrapper..."
+        echo "distributionUrl=https\://services.gradle.org/distributions/gradle-4.10.3-all.zip" > gradle/wrapper/gradle-wrapper.properties
+        
+        echo "6. Проверяем конфигурацию..."
+        echo "=== СОДЕРЖИМОЕ build.gradle (первые 50 строк) ==="
+        head -50 app/build.gradle
+        
+        echo "=== СОДЕРЖИМОЕ CMakeLists.txt ==="
+        tail -20 app/CMakeLists.txt
     
     - name: "Build APK"
       run: |
         echo "=== Сборка APK ==="
+        
+        chmod +x gradlew
         
         echo "Проверка структуры проекта..."
         ls -la
@@ -387,7 +351,7 @@ jobs:
         echo "Очистка проекта..."
         ./gradlew clean --stacktrace || echo "Предупреждение: очистка не удалась полностью"
         
-        echo "Сборка debug APK (только arm64)..."
+        echo "Сборка debug APK..."
         ./gradlew assembleDebug --stacktrace --info
         
         echo "Проверка результатов сборки..."
