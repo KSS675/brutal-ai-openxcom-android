@@ -18,13 +18,29 @@ jobs:
         submodules: recursive
         ref: brutal-ai
         
+    - name: List directory contents
+      run: |
+        echo "Содержимое директории:"
+        ls -la
+        echo "Содержимое OpenXcom (если есть):"
+        ls -la OpenXcom/ 2>/dev/null || echo "OpenXcom не найден"
+        
     - name: Configure Git submodule to android branch
       run: |
-        echo "Переключаем сабмодуль на ветку android..."
-        cd OpenXcom
-        git checkout android
-        git pull origin android
-        cd ..
+        echo "Проверяем наличие подмодуля OpenXcom..."
+        if [ -d "OpenXcom" ]; then
+          echo "Переключаем сабмодуль на ветку android..."
+          cd OpenXcom
+          git checkout android
+          git pull origin android
+          cd ..
+        else
+          echo "ОШИБКА: Подмодуль OpenXcom не найден!"
+          echo "Содержимое директории:"
+          ls -la
+          echo "Пытаемся инициализировать подмодули..."
+          git submodule update --init --recursive --force
+        fi
         
     - name: Set up JDK 8
       run: |
