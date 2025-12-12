@@ -1,0 +1,64 @@
+name: Update OpenXcom Submodule
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 12 * * 0'  # Каждое воскресенье в 12:00
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository with submodules
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        submodules: recursive
+        fetch-depth: 0
+
+    - name: Configure Git
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+    - name: Update OpenXcom submodule reference
+      run: |
+        # Переходим в директорию сабмодуля
+        cd app/src/main/jni/OpenXcom
+        
+        # Получаем последний коммит из ветки android основного репозитория
+        LATEST_COMMIT=$(git ls-remote https://github.com/KSS675/BrutalAI-OpenXcom refs/heads/android | awk '{print $1}')
+        
+        echo "Latest commit in BrutalAI-OpenXcom (android branch): $LATEST_COMMIT"
+        
+        # Проверяем текущий коммит
+        CURRENT_COMMIT=$(git rev-parse HEAD)
+        echo "Current commit in submodule: $CURRENT_COMMIT"
+        
+        if [ "$LATEST_COMMIT" != "$CURRENT_COMMIT" ] && [ -n "$LATEST_COMMIT" ]; then
+          echo "Updating submodule..."
+          # Вытягиваем изменения из основного репозитория
+          git fetch https://github.com/KSS675/BrutalAI-OpenXcom android
+          git checkout $LATEST_COMMIT
+        else
+          echo "Submodule is already up to date"
+        fi
+        
+        # Возвращаемся в корень
+        cd ../../../../..
+    - name: Update parent repository reference
+      run: |
+        # Обновляем запись о сабмодуле в основном репозитории
+        git add app/src/main/jni/OpenXcom
+        
+        # Проверяем, есть ли изменения
+        if ! git diff-index --quiet HEAD --; then
+          git commit -m "Update OpenXcom submodule to latest commit from BrutalAI-OpenXcom (android branch)"
+          echo "Changes committed"
+        else
+          echo "No changes to commit"
+        fi
+    - name: Push changes
+      run: |
+        git push origin HEAD:brutal-ai
+        
