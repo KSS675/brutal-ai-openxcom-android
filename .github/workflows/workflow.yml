@@ -1,311 +1,63 @@
-name: Build OpenXcom Brutal AI for Android (ARM64 only)
+name: Update OpenXcom Submodule
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ brutal-ai ]
+  schedule:
+    - cron: '0 12 * * 0'  # Каждое воскресенье в 12:00
 
 jobs:
-  build:
-    runs-on: ubuntu-22.04
-    timeout-minutes: 60
+  update:
+    runs-on: ubuntu-latest
     
     steps:
-    - name: Checkout with submodules
+    - name: Checkout repository with submodules
       uses: actions/checkout@v4
       with:
-        submodules: 'recursive'
+        token: ${{ secrets.GITHUB_TOKEN }}
+        submodules: recursive
         fetch-depth: 0
-    
-    - name: Initialize and switch branches
+
+    - name: Configure Git
       run: |
-        echo "=== ПЕРЕКЛЮЧЕНИЕ НА НУЖНЫЕ ВЕТКИ ==="
-        
-        echo "Текущая ветка:"
-        git branch -a
-        
-        echo "Переключаемся на ветку brutal-ai..."
-        git checkout brutal-ai
-        
-        echo "Переходим в подмодуль OpenXcom..."
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+    - name: Update OpenXcom submodule reference
+      run: |
+        # Переходим в директорию сабмодуля
         cd app/src/main/jni/OpenXcom
         
-        echo "Проверяем удаленный репозиторий подмодуля..."
-        git remote -v
+        # Получаем последний коммит из ветки android основного репозитория
+        LATEST_COMMIT=$(git ls-remote https://github.com/KSS675/BrutalAI-OpenXcom refs/heads/android | awk '{print $1}')
         
-        echo "Переключаемся на ветку android в подмодуле..."
-        git checkout android
+        echo "Latest commit in BrutalAI-OpenXcom (android branch): $LATEST_COMMIT"
         
-        echo "Обновляем подмодуль до последнего коммита..."
-        git pull origin android
+        # Проверяем текущий коммит
+        CURRENT_COMMIT=$(git rev-parse HEAD)
+        echo "Current commit in submodule: $CURRENT_COMMIT"
         
-        echo "Возвращаемся в корень..."
-        cd ../../../../../
-        
-        echo "Обновляем другие подмодули..."
-        git submodule update --init --recursive
-    
-    - name: "Fix SDL1 to SDL2 compatibility issues"
-      run: |
-        echo "=== ИСПРАВЛЕНИЕ ПРОБЛЕМ СОВМЕСТИМОСТИ SDL1 -> SDL2 ==="
-        
-        OPENXCOM_PATH="app/src/main/jni/OpenXcom"
-        cd "$OPENXCOM_PATH"
-        
-        echo "1. Создание заголовка совместимости SDL1->SDL2..."
-        mkdir -p src/Engine
-        
-        echo "// Совместимость SDL1 -> SDL2 для Brutal AI" > src/Engine/sdl_compat.h
-        echo "#ifndef SDL_COMPAT_H" >> src/Engine/sdl_compat.h
-        echo "#define SDL_COMPAT_H" >> src/Engine/sdl_compat.h
-        echo "" >> src/Engine/sdl_compat.h
-        echo "#include <SDL.h>" >> src/Engine/sdl_compat.h
-        echo "" >> src/Engine/sdl_compat.h
-        echo "// SDL1 константы, которых нет в SDL2" >> src/Engine/sdl_compat.h
-        echo "#define SDL_BUTTON_WHEELUP    5" >> src/Engine/sdl_compat.h
-        echo "#define SDL_BUTTON_WHEELDOWN  4" >> src/Engine/sdl_compat.h
-        echo "" >> src/Engine/sdl_compat.h
-        echo "// Типы SDL1" >> src/Engine/sdl_compat.h
-        echo "typedef int SDLKey;" >> src/Engine/sdl_compat.h
-        echo "typedef int SDLMod;" >> src/Engine/sdl_compat.h
-        echo "" >> src/Engine/sdl_compat.h
-        echo "// Константы клавиш SDL1, которых может не быть в SDL2" >> src/Engine/sdl_compat.h
-        echo "#define SDLK_KP0 SDLK_KP_0" >> src/Engine/sdl_compat.h
-        echo "#define SDLK_KP1 SDLK_KP_1" >> src/Engine/sdl_compat.h
-        echo "#define SDLK_KP2 SDLK_KP_2" >> src/Engine/sdl_compat.h
-        echo "#define SDLK_KP3 SDLK_KP_3" >> src/Engine/sdl_compat.h
-        echo "#define SDLK_KP4 SDLK_KP_4" >> src/Engine/sdl_compat.h
-        echo "#define SDLK_KP5 SDLK_KP_5" >> src/Engine/sdl_compat.h
-        echo "#define SDLK_KP6 SDLK_KP_6" >> src/Engine/sdl_compat.h
-        echo "#define SDLK_KP7 SDLK_KP_7" >> src/Engine/sdl_compat.h
-        echo "#define SDLK_KP8 SDLK_KP_8" >> src/Engine/sdl_compat.h
-        echo "#define SDLK_KP9 SDLK_KP_9" >> src/Engine/sdl_compat.h
-        echo "" >> src/Engine/sdl_compat.h
-        echo "// Заглушки для функций SDL1, которых нет в SDL2" >> src/Engine/sdl_compat.h
-        echo "static inline void SDL_MapMouse(int x, int y)" >> src/Engine/sdl_compat.h
-        echo "{" >> src/Engine/sdl_compat.h
-        echo "    // В SDL2 позиция мыши уже в оконных координатах" >> src/Engine/sdl_compat.h
-        echo "    (void)x;" >> src/Engine/sdl_compat.h
-        echo "    (void)y;" >> src/Engine/sdl_compat.h
-        echo "}" >> src/Engine/sdl_compat.h
-        echo "" >> src/Engine/sdl_compat.h
-        echo "static inline Uint8 SDL_GetMouseState(int* x, int* y)" >> src/Engine/sdl_compat.h
-        echo "{" >> src/Engine/sdl_compat.h
-        echo "    // В SDL2 используем SDL_GetMouseState с другим API" >> src/Engine/sdl_compat.h
-        echo "    Uint32 buttons = SDL_GetMouseState(x, y);" >> src/Engine/sdl_compat.h
-        echo "    // Конвертируем кнопки если нужно" >> src/Engine/sdl_compat.h
-        echo "    return (Uint8)buttons;" >> src/Engine/sdl_compat.h
-        echo "}" >> src/Engine/sdl_compat.h
-        echo "" >> src/Engine/sdl_compat.h
-        echo "// SDL 1.2 использовал SDL_GetKeyState, в SDL2 это SDL_GetKeyboardState" >> src/Engine/sdl_compat.h
-        echo "static inline Uint8* SDL_GetKeyState(int* numkeys)" >> src/Engine/sdl_compat.h
-        echo "{" >> src/Engine/sdl_compat.h
-        echo "    if (numkeys) *numkeys = SDL_NUM_SCANCODES;" >> src/Engine/sdl_compat.h
-        echo "    return (Uint8*)SDL_GetKeyboardState(NULL);" >> src/Engine/sdl_compat.h
-        echo "}" >> src/Engine/sdl_compat.h
-        echo "" >> src/Engine/sdl_compat.h
-        echo "// Модификаторы клавиш" >> src/Engine/sdl_compat.h
-        echo "#define KMOD_NONE    0x0000" >> src/Engine/sdl_compat.h
-        echo "#define KMOD_LSHIFT  0x0001" >> src/Engine/sdl_compat.h
-        echo "#define KMOD_RSHIFT  0x0002" >> src/Engine/sdl_compat.h
-        echo "#define KMOD_LCTRL   0x0040" >> src/Engine/sdl_compat.h
-        echo "#define KMOD_RCTRL   0x0080" >> src/Engine/sdl_compat.h
-        echo "#define KMOD_LALT    0x0100" >> src/Engine/sdl_compat.h
-        echo "#define KMOD_RALT    0x0200" >> src/Engine/sdl_compat.h
-        echo "#define KMOD_LMETA   0x0400" >> src/Engine/sdl_compat.h
-        echo "#define KMOD_RMETA   0x0800" >> src/Engine/sdl_compat.h
-        echo "#define KMOD_NUM     0x1000" >> src/Engine/sdl_compat.h
-        echo "#define KMOD_CAPS    0x2000" >> src/Engine/sdl_compat.h
-        echo "#define KMOD_MODE    0x4000" >> src/Engine/sdl_compat.h
-        echo "#define KMOD_CTRL    (KMOD_LCTRL|KMOD_RCTRL)" >> src/Engine/sdl_compat.h
-        echo "#define KMOD_SHIFT   (KMOD_LSHIFT|KMOD_RSHIFT)" >> src/Engine/sdl_compat.h
-        echo "#define KMOD_ALT     (KMOD_LALT|KMOD_RALT)" >> src/Engine/sdl_compat.h
-        echo "#define KMOD_META    (KMOD_LMETA|KMOD_RMETA)" >> src/Engine/sdl_compat.h
-        echo "" >> src/Engine/sdl_compat.h
-        echo "#endif // SDL_COMPAT_H" >> src/Engine/sdl_compat.h
-        
-        echo "2. Поиск и исправление файлов с SDL1 зависимостями..."
-        
-        echo "Ищем все файлы с SDLKey и заменяем на int..."
-        find . -type f \( -name "*.h" -o -name "*.cpp" -o -name "*.c" \) -exec grep -l "SDLKey" {} \; | while read file; do
-            echo "Исправляю SDLKey в $file"
-            sed -i 's/\bSDLKey\b/int/g' "$file"
-        done
-        
-        echo "Ищем все файлы с SDLMod и заменяем на int..."
-        find . -type f \( -name "*.h" -o -name "*.cpp" -o -name "*.c" \) -exec grep -l "SDLMod" {} \; | while read file; do
-            echo "Исправляю SDLMod в $file"
-            sed -i 's/\bSDLMod\b/int/g' "$file"
-        done
-        
-        echo "Заменяем SDL_BUTTON_WHEELDOWN и SDL_BUTTON_WHEELUP на числовые значения..."
-        find . -type f \( -name "*.h" -o -name "*.cpp" -o -name "*.c" \) -exec sed -i 's/SDL_BUTTON_WHEELDOWN/4/g; s/SDL_BUTTON_WHEELUP/5/g' {} \;
-        
-        echo "Исправляем SDL_GetMouseState вызовы..."
-        find . -type f \( -name "*.cpp" -o -name "*.c" \) -exec sed -i 's/SDL_GetMouseState(&\([^)]*\))/SDL_GetMouseState(\&\1, NULL)/g' {} \;
-        
-        echo "3. Проверяем файлы, использующие SDL_MapMouse..."
-        MAPMOUSE_FILES=$(find . -type f \( -name "*.cpp" -o -name "*.c" \) -exec grep -l "SDL_MapMouse" {} \; 2>/dev/null || true)
-        
-        for file in $MAPMOUSE_FILES; do
-            echo "Найден SDL_MapMouse в $file"
-            if ! grep -q "#include.*sdl_compat\.h" "$file"; then
-                if [[ "$file" == src/Engine/* ]]; then
-                    sed -i '/#include.*\.h"/a #include "sdl_compat.h"' "$file"
-                else
-                    sed -i '/#include.*\.h"/a #include "Engine/sdl_compat.h"' "$file"
-                fi
-            fi
-        done
-        
-        echo "4. Проверяем и исправляем rapidyaml проблемы..."
-        if grep -r "ryml" src/ 2>/dev/null | grep -q "error"; then
-            echo "Найдены проблемы с rapidyaml, исправляем..."
-            find src/ -name "*.cpp" -type f -exec grep -l "ryml" {} \; | while read file; do
-                if ! grep -q "#include.*ryml" "$file"; then
-                    echo "Добавляем rapidyaml include в $file"
-                    sed -i '1i #include "ryml.hpp"' "$file"
-                fi
-            done
-        fi
-        
-        echo "5. Проверяем другие возможные SDL1 зависимости..."
-        SDL1_CALLS=("SDL_GetKeyState" "SDL_EnableUNICODE" "SDL_EnableKeyRepeat" "SDL_WM_GrabInput")
-        for call in "${SDL1_CALLS[@]}"; do
-            FILES_WITH_CALL=$(find . -type f \( -name "*.cpp" -o -name "*.c" -o -name "*.h" \) -exec grep -l "$call" {} \; 2>/dev/null || true)
-            if [ -n "$FILES_WITH_CALL" ]; then
-                echo "Внимание: найден SDL1 вызов $call в:"
-                echo "$FILES_WITH_CALL"
-            fi
-        done
-        
-        cd ../../../../../
-    
-    - name: Setup Java 8
-      uses: actions/setup-java@v4
-      with:
-        java-version: '8'
-        distribution: 'temurin'
-    
-    - name: Setup Android SDK and NDK 18b
-      run: |
-        echo "=== Установка Android SDK и NDK 18b ==="
-        
-        mkdir -p /home/runner/android-sdk
-        cd /home/runner/android-sdk
-        
-        echo "Скачивание Android Command Line Tools..."
-        wget -q https://dl.google.com/android/repository/commandlinetools-linux-8512546_latest.zip
-        echo "Распаковка..."
-        unzip -q commandlinetools-linux-8512546_latest.zip
-        rm commandlinetools-linux-8512546_latest.zip
-        
-        echo "Установка платформы Android 28..."
-        yes | cmdline-tools/bin/sdkmanager --sdk_root=/home/runner/android-sdk "platforms;android-28"
-        
-        echo "Установка build-tools 28.0.3..."
-        yes | cmdline-tools/bin/sdkmanager --sdk_root=/home/runner/android-sdk "build-tools;28.0.3"
-        
-        echo "Установка platform-tools..."
-        yes | cmdline-tools/bin/sdkmanager --sdk_root=/home/runner/android-sdk "platform-tools"
-        
-        echo "Установка NDK 18.1.5063045..."
-        yes | cmdline-tools/bin/sdkmanager --sdk_root=/home/runner/android-sdk "ndk;18.1.5063045"
-        
-        echo "ANDROID_SDK_ROOT=/home/runner/android-sdk" >> $GITHUB_ENV
-        echo "ANDROID_HOME=/home/runner/android-sdk" >> $GITHUB_ENV
-        echo "ANDROID_NDK_HOME=/home/runner/android-sdk/ndk/18.1.5063045" >> $GITHUB_ENV
-        echo "PATH=/home/runner/android-sdk/cmdline-tools/bin:$PATH" >> $GITHUB_ENV
-        
-        cd $GITHUB_WORKSPACE
-        
-        echo "sdk.dir=/home/runner/android-sdk" > local.properties
-        echo "ndk.dir=/home/runner/android-sdk/ndk/18.1.5063045" >> local.properties
-        
-        echo "local.properties создан:"
-        cat local.properties
-    
-    - name: "Configure build for ARM64 only"
-      run: |
-        echo "=== Настройка сборки только для ARM64 ==="
-        
-        if [ -f "app/build.gradle" ]; then
-          echo "Настройка build.gradle..."
-          
-          sed -i '/android {/,/}/ {
-            /compileSdkVersion/ a\    ndkVersion "18.1.5063045"
-          }' app/build.gradle
-          
-          sed -i '/defaultConfig {/,/}/ {
-            /ndk {/,/}/ {
-              s/abiFilters.*/abiFilters "arm64-v8a"/
-            }
-          }' app/build.gradle
-          
-          sed -i 's/minifyEnabled true/minifyEnabled false/g' app/build.gradle
-          sed -i 's/shrinkResources true/shrinkResources false/g' app/build.gradle
-        fi
-        
-        if [ -f "app/CMakeLists.txt" ]; then
-          sed -i 's/set(ANDROID_ABI "armeabi-v7a arm64-v8a x86 x86_64")/set(ANDROID_ABI "arm64-v8a")/g' app/CMakeLists.txt
-        fi
-        
-        echo "Создаем gradle.properties..."
-        echo "org.gradle.jvmargs=-Xmx4g" > gradle.properties
-        echo "android.useAndroidX=true" >> gradle.properties
-        echo "android.enableJetifier=true" >> gradle.properties
-        echo "android.enableR8=false" >> gradle.properties
-        
-        echo "Обновляем gradle wrapper..."
-        echo "distributionUrl=https\://services.gradle.org/distributions/gradle-4.10.3-all.zip" > gradle/wrapper/gradle-wrapper.properties
-        
-        chmod +x gradlew
-    
-    - name: "Build APK"
-      run: |
-        echo "=== Сборка APK ==="
-        
-        echo "Проверка структуры проекта..."
-        ls -la
-        
-        echo "Проверка подмодулей..."
-        if [ -d "app/src/main/jni/OpenXcom" ]; then
-          echo "Подмодуль OpenXcom найден"
+        if [ "$LATEST_COMMIT" != "$CURRENT_COMMIT" ] && [ -n "$LATEST_COMMIT" ]; then
+          echo "Updating submodule..."
+          # Вытягиваем изменения из основного репозитория
+          git fetch https://github.com/KSS675/BrutalAI-OpenXcom android
+          git checkout $LATEST_COMMIT
         else
-          echo "❌ Подмодуль OpenXcom не найден!"
-          exit 1
+          echo "Submodule is already up to date"
         fi
         
-        echo "Очистка проекта..."
-        ./gradlew clean --stacktrace || echo "Предупреждение: очистка не удалась полностью"
+        # Возвращаемся в корень
+        cd ../../../../..
+    - name: Update parent repository reference
+      run: |
+        # Обновляем запись о сабмодуле в основном репозитории
+        git add app/src/main/jni/OpenXcom
         
-        echo "Сборка debug APK..."
-        ./gradlew assembleDebug --stacktrace --info
-        
-        echo "Проверка результатов сборки..."
-        if [ -f "app/build/outputs/apk/debug/app-debug.apk" ]; then
-          echo "✅ СБОРКА УСПЕШНА!"
-          echo "APK размер: $(du -h app/build/outputs/apk/debug/app-debug.apk | cut -f1)"
-          
-          mkdir -p output
-          cp app/build/outputs/apk/debug/app-debug.apk output/
-          ls -la output/
+        # Проверяем, есть ли изменения
+        if ! git diff-index --quiet HEAD --; then
+          git commit -m "Update OpenXcom submodule to latest commit from BrutalAI-OpenXcom (android branch)"
+          echo "Changes committed"
         else
-          echo "❌ Сборка не удалась! Проверяем логи..."
-          
-          find . -name "*.log" -type f | head -10 | while read log; do
-            echo "=== Лог файл: $log ==="
-            tail -100 "$log"
-          done
-          
-          ./gradlew build --stacktrace 2>&1 | tail -200
-          
-          exit 1
+          echo "No changes to commit"
         fi
-    
-    - name: Upload APK artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: BrutalAI-Android-ARM64
-        path: output/app-debug.apk
-        retention-days: 7
+    - name: Push changes
+      run: |
+        git push origin HEAD:brutal-ai
