@@ -1,397 +1,109 @@
-name: Build OpenXcom Brutal AI for Android (ARM64 only)
+name: Build BrutalAI Android APK
 
 on:
-  workflow_dispatch:
   push:
     branches: [ brutal-ai ]
+  pull_request:
+    branches: [ brutal-ai ]
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 60
     
     steps:
-    - name: Checkout with submodules
-      uses: actions/checkout@v4
-      with:
-        submodules: 'recursive'
-        fetch-depth: 0
-    
-    - name: Initialize and switch branches
+    - name: Checkout repository with submodules
       run: |
-        echo "=== ПЕРЕКЛЮЧЕНИЕ НА НУЖНЫЕ ВЕТКИ ==="
+        echo "Клонируем репозиторий с сабмодулями..."
+        git clone --branch brutal-ai --recursive https://github.com/KSS675/openxcom-android.git
+        cd openxcom-android
         
-        echo "Текущая ветка:"
-        git branch -a
-        
-        echo "Переключаемся на ветку brutal-ai..."
-        git checkout brutal-ai
-        
-        echo "Переходим в подмодуль OpenXcom..."
-        cd app/src/main/jni/OpenXcom
-        
-        echo "Проверяем удаленный репозиторий подмодуля..."
-        git remote -v
-        
-        echo "Переключаемся на ветку android в подмодуле..."
+    - name: Configure Git submodule
+      run: |
+        echo "Настраиваем сабмодуль на нужную ветку..."
+        cd openxcom-android
+        git submodule set-url OpenXcom https://github.com/KSS675/BrutalAI-OpenXcom.git
+        git submodule sync
+        git submodule update --init --remote --force
+        cd OpenXcom
         git checkout android
+        cd ..
         
-        echo "Обновляем подмодуль до последнего коммита..."
-        git pull origin android
-        
-        echo "Возвращаемся в корень..."
-        cd ../../../../../
-        
-        echo "Обновляем другие подмодули..."
-        git submodule update --init --recursive
-    
-    - name: "Fix SDL1 to SDL2 compatibility issues"
+    - name: Set up JDK 8
       run: |
-        echo "=== ИСПРАВЛЕНИЕ ПРОБЛЕМ СОВМЕСТИМОСТИ SDL1 -> SDL2 ==="
+        echo "Устанавливаем Java 8..."
+        sudo apt-get update
+        sudo apt-get install -y openjdk-8-jdk
+        echo "JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64" >> $GITHUB_ENV
         
-        OPENXCOM_PATH="app/src/main/jni/OpenXcom"
-        cd "$OPENXCOM_PATH"
-        
-        echo "1. Создание заголовка совместимости SDL1->SDL2..."
-        mkdir -p src/Engine
-        
-        echo "// Совместимость SDL1 -> SDL2 для Brutal AI" > src/Engine/sdl_compat.h
-        echo "#ifndef SDL_COMPAT_H" >> src/Engine/sdl_compat.h
-        echo "#define SDL_COMPAT_H" >> src/Engine/sdl_compat.h
-        echo "" >> src/Engine/sdl_compat.h
-        echo "#include <SDL.h>" >> src/Engine/sdl_compat.h
-        echo "" >> src/Engine/sdl_compat.h
-        echo "// SDL1 константы, которых нет в SDL2" >> src/Engine/sdl_compat.h
-        echo "#define SDL_BUTTON_WHEELUP    5" >> src/Engine/sdl_compat.h
-        echo "#define SDL_BUTTON_WHEELDOWN  4" >> src/Engine/sdl_compat.h
-        echo "" >> src/Engine/sdl_compat.h
-        echo "// Типы SDL1" >> src/Engine/sdl_compat.h
-        echo "typedef int SDLKey;" >> src/Engine/sdl_compat.h
-        echo "typedef int SDLMod;" >> src/Engine/sdl_compat.h
-        echo "" >> src/Engine/sdl_compat.h
-        echo "// Константы клавиш SDL1, которых может не быть в SDL2" >> src/Engine/sdl_compat.h
-        echo "#define SDLK_KP0 SDLK_KP_0" >> src/Engine/sdl_compat.h
-        echo "#define SDLK_KP1 SDLK_KP_1" >> src/Engine/sdl_compat.h
-        echo "#define SDLK_KP2 SDLK_KP_2" >> src/Engine/sdl_compat.h
-        echo "#define SDLK_KP3 SDLK_KP_3" >> src/Engine/sdl_compat.h
-        echo "#define SDLK_KP4 SDLK_KP_4" >> src/Engine/sdl_compat.h
-        echo "#define SDLK_KP5 SDLK_KP_5" >> src/Engine/sdl_compat.h
-        echo "#define SDLK_KP6 SDLK_KP_6" >> src/Engine/sdl_compat.h
-        echo "#define SDLK_KP7 SDLK_KP_7" >> src/Engine/sdl_compat.h
-        echo "#define SDLK_KP8 SDLK_KP_8" >> src/Engine/sdl_compat.h
-        echo "#define SDLK_KP9 SDLK_KP_9" >> src/Engine/sdl_compat.h
-        echo "" >> src/Engine/sdl_compat.h
-        echo "// Заглушки для функций SDL1, которых нет в SDL2" >> src/Engine/sdl_compat.h
-        echo "static inline void SDL_MapMouse(int x, int y)" >> src/Engine/sdl_compat.h
-        echo "{" >> src/Engine/sdl_compat.h
-        echo "    // В SDL2 позиция мыши уже в оконных координатах" >> src/Engine/sdl_compat.h
-        echo "    (void)x;" >> src/Engine/sdl_compat.h
-        echo "    (void)y;" >> src/Engine/sdl_compat.h
-        echo "}" >> src/Engine/sdl_compat.h
-        echo "" >> src/Engine/sdl_compat.h
-        echo "static inline void SDL_WarpMouse(int x, int y)" >> src/Engine/sdl_compat.h
-        echo "{" >> src/Engine/sdl_compat.h
-        echo "    // В SDL2 используем SDL_WarpMouseInWindow" >> src/Engine/sdl_compat.h
-        echo "    SDL_Window* window = SDL_GetMouseFocus();" >> src/Engine/sdl_compat.h
-        echo "    if (window) {" >> src/Engine/sdl_compat.h
-        echo "        SDL_WarpMouseInWindow(window, x, y);" >> src/Engine/sdl_compat.h
-        echo "    }" >> src/Engine/sdl_compat.h
-        echo "}" >> src/Engine/sdl_compat.h
-        echo "" >> src/Engine/sdl_compat.h
-        echo "static inline Uint8 SDL_GetMouseState(int* x, int* y, Uint8* buttons)" >> src/Engine/sdl_compat.h
-        echo "{" >> src/Engine/sdl_compat.h
-        echo "    Uint32 state = SDL_GetMouseState(x, y);" >> src/Engine/sdl_compat.h
-        echo "    if (buttons) {" >> src/Engine/sdl_compat.h
-        echo "        *buttons = (Uint8)state;" >> src/Engine/sdl_compat.h
-        echo "    }" >> src/Engine/sdl_compat.h
-        echo "    return (Uint8)state;" >> src/Engine/sdl_compat.h
-        echo "}" >> src/Engine/sdl_compat.h
-        echo "" >> src/Engine/sdl_compat.h
-        echo "// SDL 1.2 использовал SDL_GetKeyState, в SDL2 это SDL_GetKeyboardState" >> src/Engine/sdl_compat.h
-        echo "static inline Uint8* SDL_GetKeyState(int* numkeys)" >> src/Engine/sdl_compat.h
-        echo "{" >> src/Engine/sdl_compat.h
-        echo "    if (numkeys) *numkeys = SDL_NUM_SCANCODES;" >> src/Engine/sdl_compat.h
-        echo "    return (Uint8*)SDL_GetKeyboardState(NULL);" >> src/Engine/sdl_compat.h
-        echo "}" >> src/Engine/sdl_compat.h
-        echo "" >> src/Engine/sdl_compat.h
-        echo "// Модификаторы клавиш" >> src/Engine/sdl_compat.h
-        echo "#define KMOD_NONE    0x0000" >> src/Engine/sdl_compat.h
-        echo "#define KMOD_LSHIFT  0x0001" >> src/Engine/sdl_compat.h
-        echo "#define KMOD_RSHIFT  0x0002" >> src/Engine/sdl_compat.h
-        echo "#define KMOD_LCTRL   0x0040" >> src/Engine/sdl_compat.h
-        echo "#define KMOD_RCTRL   0x0080" >> src/Engine/sdl_compat.h
-        echo "#define KMOD_LALT    0x0100" >> src/Engine/sdl_compat.h
-        echo "#define KMOD_RALT    0x0200" >> src/Engine/sdl_compat.h
-        echo "#define KMOD_LMETA   0x0400" >> src/Engine/sdl_compat.h
-        echo "#define KMOD_RMETA   0x0800" >> src/Engine/sdl_compat.h
-        echo "#define KMOD_NUM     0x1000" >> src/Engine/sdl_compat.h
-        echo "#define KMOD_CAPS    0x2000" >> src/Engine/sdl_compat.h
-        echo "#define KMOD_MODE    0x4000" >> src/Engine/sdl_compat.h
-        echo "#define KMOD_CTRL    (KMOD_LCTRL|KMOD_RCTRL)" >> src/Engine/sdl_compat.h
-        echo "#define KMOD_SHIFT   (KMOD_LSHIFT|KMOD_RSHIFT)" >> src/Engine/sdl_compat.h
-        echo "#define KMOD_ALT     (KMOD_LALT|KMOD_RALT)" >> src/Engine/sdl_compat.h
-        echo "#define KMOD_META    (KMOD_LMETA|KMOD_RMETA)" >> src/Engine/sdl_compat.h
-        echo "" >> src/Engine/sdl_compat.h
-        echo "#endif // SDL_COMPAT_H" >> src/Engine/sdl_compat.h
-        
-        echo "2. Поиск и исправление файлов с SDL1 зависимостями..."
-        echo "2.1. Заменяем SDLKey на int..."
-        find . -type f \( -name "*.h" -o -name "*.cpp" -o -name "*.c" \) -exec sed -i 's/\bSDLKey\b/int/g' {} \;
-        
-        echo "2.2. Заменяем SDLMod на int..."
-        find . -type f \( -name "*.h" -o -name "*.cpp" -o -name "*.c" \) -exec sed -i 's/\bSDLMod\b/int/g' {} \;
-        
-        echo "2.3. Заменяем SDL_BUTTON_WHEELDOWN и SDL_BUTTON_WHEELUP на числовые значения..."
-        find . -type f \( -name "*.h" -o -name "*.cpp" -o -name "*.c" \) -exec sed -i 's/SDL_BUTTON_WHEELDOWN/4/g; s/SDL_BUTTON_WHEELUP/5/g' {} \;
-        
-        echo "2.4. Исправляем опечатку Unit16 на Uint16..."
-        find . -type f \( -name "*.h" -o -name "*.cpp" -o -name "*.c" \) -exec sed -i 's/\bUnit16\b/Uint16/g' {} \;
-        
-        echo "3. Исправляем конкретные файлы с ошибками..."
-        echo "3.1. Исправляем Game.cpp..."
-        if [ -f "src/Engine/Game.cpp" ]; then
-            echo "Исправляем строку 187: SDL_GetMouseState(&x, &y, NULL)..."
-            sed -i '187s/SDL_GetMouseState(&x, &y, NULL)/SDL_GetMouseState(&x, &y)/' src/Engine/Game.cpp
-            
-            echo "Исправляем атрибуты fallthrough..."
-            sed -i 's/\[\[gnu::fallthrough\]\]/\/\/ fallthrough/g' src/Engine/Game.cpp
-            
-            echo "Добавляем include sdl_compat.h..."
-            if ! grep -q "#include.*sdl_compat\.h" src/Engine/Game.cpp; then
-                sed -i '/#include ".*\.h"/a #include "sdl_compat.h"' src/Engine/Game.cpp
-            fi
-        fi
-        
-        echo "3.2. Исправляем ResearchState.cpp..."
-        if [ -f "src/Basescape/ResearchState.cpp" ]; then
-            echo "Исправляем строки с SDL_WarpMouse..."
-            sed -i 's/Unit16/Uint16/g' src/Basescape/ResearchState.cpp
-            
-            echo "Добавляем include sdl_compat.h..."
-            if ! grep -q "#include.*sdl_compat\.h" src/Basescape/ResearchState.cpp; then
-                sed -i '/#include ".*\.h"/a #include "Engine/sdl_compat.h"' src/Basescape/ResearchState.cpp
-            fi
-        fi
-        
-        echo "4. Добавляем include sdl_compat.h в другие файлы..."
-        echo "4.1. Ищем файлы с SDL_MapMouse..."
-        MAPMOUSE_FILES=$(find . -type f \( -name "*.cpp" -o -name "*.c" \) -exec grep -l "SDL_MapMouse" {} \; 2>/dev/null || true)
-        
-        for file in $MAPMOUSE_FILES; do
-            if ! grep -q "#include.*sdl_compat\.h" "$file"; then
-                if [[ "$file" == src/Engine/* ]]; then
-                    sed -i '/#include.*\.h"/a #include "sdl_compat.h"' "$file"
-                else
-                    sed -i '/#include.*\.h"/a #include "Engine/sdl_compat.h"' "$file"
-                fi
-            fi
-        done
-        
-        echo "4.2. Ищем файлы с SDL_WarpMouse..."
-        WARPMOUSE_FILES=$(find . -type f \( -name "*.cpp" -o -name "*.c" \) -exec grep -l "SDL_WarpMouse" {} \; 2>/dev/null || true)
-        
-        for file in $WARPMOUSE_FILES; do
-            if ! grep -q "#include.*sdl_compat\.h" "$file"; then
-                if [[ "$file" == src/Engine/* ]]; then
-                    sed -i '/#include.*\.h"/a #include "sdl_compat.h"' "$file"
-                else
-                    sed -i '/#include.*\.h"/a #include "Engine/sdl_compat.h"' "$file"
-                fi
-            fi
-        done
-        
-        echo "4.3. Ищем файлы с SDL_GetMouseState..."
-        GETMOUSE_FILES=$(find . -type f \( -name "*.cpp" -o -name "*.c" \) -exec grep -l "SDL_GetMouseState" {} \; 2>/dev/null || true)
-        
-        for file in $GETMOUSE_FILES; do
-            if ! grep -q "#include.*sdl_compat\.h" "$file"; then
-                if [[ "$file" == src/Engine/* ]]; then
-                    sed -i '/#include.*\.h"/a #include "sdl_compat.h"' "$file"
-                else
-                    sed -i '/#include.*\.h"/a #include "Engine/sdl_compat.h"' "$file"
-                fi
-            fi
-        done
-        
-        echo "5. Исправляем другие fallthrough атрибуты..."
-        find . -type f \( -name "*.cpp" -o -name "*.c" -o -name "*.h" \) -exec sed -i 's/\[\[gnu::fallthrough\]\]/\/\/ fallthrough/g' {} \;
-        
-        cd ../../../../../
-    
-    - name: Setup Java 8
-      uses: actions/setup-java@v4
-      with:
-        java-version: '8'
-        distribution: 'temurin'
-    
-    - name: Setup Android SDK and NDK 18b
+    - name: Download Android SDK
       run: |
-        echo "=== Установка Android SDK и NDK 18b ==="
+        echo "Скачиваем Android SDK..."
+        cd /usr/local/lib
+        sudo wget -q https://dl.google.com/android/repository/sdk-tools-linux-4333796.zip
+        sudo unzip -q sdk-tools-linux-4333796.zip -d android-sdk
+        sudo rm sdk-tools-linux-4333796.zip
+        echo "ANDROID_HOME=/usr/local/lib/android-sdk" >> $GITHUB_ENV
+        echo "PATH=$ANDROID_HOME/tools/bin:$ANDROID_HOME/platform-tools:$PATH" >> $GITHUB_ENV
         
-        mkdir -p /home/runner/android-sdk
-        cd /home/runner/android-sdk
+    - name: Accept Android licenses
+      run: |
+        echo "Принимаем лицензии Android SDK..."
+        yes | $ANDROID_HOME/tools/bin/sdkmanager --licenses || true
+        $ANDROID_HOME/tools/bin/sdkmanager "platforms;android-28" "platform-tools" "build-tools;28.0.3"
         
-        echo "Скачивание Android Command Line Tools..."
-        wget -q https://dl.google.com/android/repository/commandlinetools-linux-8512546_latest.zip
-        echo "Распаковка..."
-        unzip -q commandlinetools-linux-8512546_latest.zip
-        rm commandlinetools-linux-8512546_latest.zip
+    - name: Download Android NDK 18b
+      run: |
+        echo "Скачиваем Android NDK 18b..."
+        cd /usr/local/lib
+        sudo wget -q https://dl.google.com/android/repository/android-ndk-r18b-linux-x86_64.zip
+        sudo unzip -q android-ndk-r18b-linux-x86_64.zip
+        sudo rm android-ndk-r18b-linux-x86_64.zip
+        echo "ANDROID_NDK_HOME=/usr/local/lib/android-ndk-r18b" >> $GITHUB_ENV
+        echo "NDK_HOME=/usr/local/lib/android-ndk-r18b" >> $GITHUB_ENV
+        echo "PATH=$ANDROID_NDK_HOME:$PATH" >> $GITHUB_ENV
         
-        echo "Установка платформы Android 28..."
-        yes | cmdline-tools/bin/sdkmanager --sdk_root=/home/runner/android-sdk "platforms;android-28"
-        
-        echo "Установка build-tools 28.0.3..."
-        yes | cmdline-tools/bin/sdkmanager --sdk_root=/home/runner/android-sdk "build-tools;28.0.3"
-        
-        echo "Установка platform-tools..."
-        yes | cmdline-tools/bin/sdkmanager --sdk_root=/home/runner/android-sdk "platform-tools"
-        
-        echo "Установка NDK 18.1.5063045..."
-        yes | cmdline-tools/bin/sdkmanager --sdk_root=/home/runner/android-sdk "ndk;18.1.5063045"
-        
-        echo "ANDROID_SDK_ROOT=/home/runner/android-sdk" >> $GITHUB_ENV
-        echo "ANDROID_HOME=/home/runner/android-sdk" >> $GITHUB_ENV
-        echo "ANDROID_NDK_HOME=/home/runner/android-sdk/ndk/18.1.5063045" >> $GITHUB_ENV
-        echo "PATH=/home/runner/android-sdk/cmdline-tools/bin:$PATH" >> $GITHUB_ENV
-        
-        cd $GITHUB_WORKSPACE
-        
-        echo "sdk.dir=/home/runner/android-sdk" > local.properties
-        echo "ndk.dir=/home/runner/android-sdk/ndk/18.1.5063045" >> local.properties
-        
-        echo "local.properties создан:"
+    - name: Create local.properties
+      run: |
+        echo "Создаем local.properties..."
+        cd openxcom-android
+        echo "sdk.dir=$ANDROID_HOME" > local.properties
+        echo "ndk.dir=$ANDROID_NDK_HOME" >> local.properties
         cat local.properties
-    
-    - name: "Fix and configure for ARM64"
+        
+    - name: Configure build for arm64-v8a only
       run: |
-        echo "=== НАСТРОЙКА СБОРКИ ТОЛЬКО ДЛЯ ARM64 ==="
+        echo "Настраиваем сборку только для arm64-v8a..."
+        cd openxcom-android/app
+        # Создаем gradle.properties для ограничения архитектур
+        echo "android.useDeprecatedNdk=true" > gradle.properties
+        echo "APP_ABI=arm64-v8a" >> gradle.properties
         
-        echo "1. Восстанавливаем оригинальный build.gradle..."
-        git checkout HEAD -- app/build.gradle 2>/dev/null || echo "Не удалось восстановить build.gradle"
+        # Модифицируем build.gradle для arm64 только
+        sed -i '/ndk {/!b;n;c\            abiFilters "arm64-v8a"' build.gradle || true
         
-        echo "2. Исправляем build.gradle..."
-        if [ -f "app/build.gradle" ]; then
-            echo "Добавляем ndkVersion..."
-            if ! grep -q "ndkVersion" app/build.gradle; then
-                sed -i '/android {/a\    ndkVersion "18.1.5063045"' app/build.gradle
-            else
-                sed -i 's/ndkVersion .*/ndkVersion "18.1.5063045"/g' app/build.gradle
-            fi
-            
-            echo "Добавляем abiFilters только для arm64-v8a..."
-            if grep -q "abiFilters" app/build.gradle; then
-                sed -i 's/abiFilters .*/abiFilters "arm64-v8a"/g' app/build.gradle
-            else
-                sed -i '/defaultConfig {/,/}/ {
-                    /versionName/ a\
-        ndk {
-            abiFilters "arm64-v8a"
-        }
-                }' app/build.gradle
-            fi
-            
-            echo "Отключаем минификацию..."
-            sed -i 's/minifyEnabled true/minifyEnabled false/g' app/build.gradle
-            sed -i 's/shrinkResources true/shrinkResources false/g' app/build.gradle
-            
-            echo "Проверяем, нет ли ошибок в синтаксисе..."
-            # Проверяем строку 35 (где была ошибка)
-            if [ -n "$(sed -n '35p' app/build.gradle | grep 'UE\|AMDR0')" ]; then
-                echo "Исправляем строку 35..."
-                sed -i '35s/.*/            arguments "-DANDROID_ABI=arm64-v8a", "-DANDROID_STL=c++_static"/' app/build.gradle
-            fi
-        fi
-        
-        echo "3. Исправляем CMakeLists.txt..."
-        if [ -f "app/CMakeLists.txt" ]; then
-            sed -i 's/set(ANDROID_ABI "armeabi-v7a arm64-v8a x86 x86_64")/set(ANDROID_ABI "arm64-v8a")/g' app/CMakeLists.txt
-            sed -i 's/armeabi-v7a arm64-v8a x86 x86_64/arm64-v8a/g' app/CMakeLists.txt
-            echo "" >> app/CMakeLists.txt
-            echo "# Принудительно устанавливаем только ARM64" >> app/CMakeLists.txt
-            echo "set(CMAKE_ANDROID_ARCH_ABI arm64-v8a)" >> app/CMakeLists.txt
-        fi
-        
-        echo "4. Создаем gradle.properties..."
-        echo "org.gradle.jvmargs=-Xmx4g" > gradle.properties
-        echo "android.useAndroidX=true" >> gradle.properties
-        echo "android.enableJetifier=true" >> gradle.properties
-        echo "android.enableR8=false" >> gradle.properties
-        
-        echo "5. Обновляем gradle wrapper..."
-        echo "distributionUrl=https\://services.gradle.org/distributions/gradle-4.10.3-all.zip" > gradle/wrapper/gradle-wrapper.properties
-        
-        echo "6. Проверяем конфигурацию..."
-        echo "=== СОДЕРЖИМОЕ build.gradle (первые 50 строк) ==="
-        head -50 app/build.gradle
-        
-        echo "=== СОДЕРЖИМОЕ CMakeLists.txt ==="
-        tail -20 app/CMakeLists.txt
-    
-    - name: "Build APK"
+    - name: Build with Gradle 4.10.3
       run: |
-        echo "=== Сборка APK ==="
+        echo "Собираем APK с Gradle 4.10.3..."
+        cd openxcom-android
         
+        # Устанавливаем конкретную версию Gradle wrapper
+        sed -i 's/gradle-.*-bin.zip/gradle-4.10.3-bin.zip/' gradle/wrapper/gradle-wrapper.properties
+        
+        # Даем права на выполнение
         chmod +x gradlew
         
-        echo "Проверка структуры проекта..."
-        ls -la
-        echo "app директория:"
-        ls -la app/
+        # Собираем Release APK
+        ./gradlew clean assembleRelease --no-daemon --stacktrace
         
-        echo "Проверка подмодулей..."
-        if [ -d "app/src/main/jni/OpenXcom" ]; then
-          echo "Подмодуль OpenXcom найден"
-          echo "Проверяем исправления в Game.cpp:"
-          grep -n "SDL_GetMouseState" app/src/main/jni/OpenXcom/src/Engine/Game.cpp || echo "Не найден"
-        else
-          echo "❌ Подмодуль OpenXcom не найден!"
-          exit 1
-        fi
-        
-        echo "Очистка проекта..."
-        ./gradlew clean --stacktrace || echo "Предупреждение: очистка не удалась полностью"
-        
-        echo "Сборка debug APK..."
-        ./gradlew assembleDebug --stacktrace --info
-        
-        echo "Проверка результатов сборки..."
-        if [ -f "app/build/outputs/apk/debug/app-debug.apk" ]; then
-          echo "✅ СБОРКА УСПЕШНА!"
-          echo "APK размер: $(du -h app/build/outputs/apk/debug/app-debug.apk | cut -f1)"
-          
-          echo "Создаем артефакт..."
-          mkdir -p output
-          cp app/build/outputs/apk/debug/app-debug.apk output/brutal-ai-android-arm64.apk
-          
-          echo "Информация о APK:"
-          ls -la output/
-          echo ""
-          echo "Содержимое APK (архитектуры):"
-          unzip -l output/brutal-ai-android-arm64.apk | grep lib/ || echo "Библиотеки не найдены"
-        else
-          echo "❌ Сборка не удалась!"
-          
-          echo "Ищем файлы с ошибками..."
-          find . -name "*.log" -type f | head -10 | while read log; do
-            echo "=== Лог файл: $log ==="
-            tail -50 "$log" | grep -i "error\|fail\|undefined" || echo "Ошибки не найдены"
-          done
-          
-          echo "Проверяем build.gradle..."
-          cat app/build.gradle | grep -A5 -B5 "abi\|ndk\|abiFilters"
-          
-          echo "Проверяем CMakeLists.txt..."
-          cat app/CMakeLists.txt | grep -i "abi\|arch\|arm"
-          
-          echo "Последние 100 строк вывода сборки:"
-          tail -100 build.log 2>/dev/null || echo "Файл build.log не найден"
-          
-          exit 1
-        fi
-    
     - name: Upload APK artifact
       uses: actions/upload-artifact@v4
       with:
-        name: BrutalAI-Android-ARM64
-        path: output/brutal-ai-android-arm64.apk
+        name: BrutalAI-Android-APK
+        path: openxcom-android/app/build/outputs/apk/release/*.apk
         retention-days: 7
+        
+    - name: List build outputs
+      run: |
+        echo "Собранные файлы:"
+        find openxcom-android -name "*.apk" -type f | xargs ls -la
