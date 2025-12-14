@@ -92,47 +92,131 @@ jobs:
         echo "ndk.dir=$ANDROID_NDK_HOME" >> local.properties
         cat local.properties
         
-    - name: Configure build for arm64-v8a only
+    - name: Fix app/build.gradle syntax
       run: |
-        echo "Настраиваем сборку только для arm64-v8a..."
-        
-        # Создаем gradle.properties для ограничения архитектур
-        echo "android.useDeprecatedNdk=true" > app/gradle.properties
-        echo "APP_ABI=arm64-v8a" >> app/gradle.properties
-        
-        # Модифицируем app/build.gradle для сборки только arm64-v8a
+        echo "Исправляем синтаксис build.gradle..."
         if [ -f "app/build.gradle" ]; then
-          echo "Модифицируем build.gradle..."
+          echo "Создаем резервную копию build.gradle..."
+          cp app/build.gradle app/build.gradle.backup
           
-          # Способ 1: Добавляем ndk блок в defaultConfig
-          if ! grep -q "ndk {" app/build.gradle; then
-            # Если ndk блока нет, добавляем его в defaultConfig
-            sed -i '/defaultConfig {/a\        ndk {\n            abiFilters "arm64-v8a"\n        }' app/build.gradle
+          echo "Проверяем текущий build.gradle..."
+          echo "=== Первые 30 строк build.gradle ==="
+          head -30 app/build.gradle
+          echo "==================================="
+          
+          # Исправляем возможные синтаксические ошибки
+          echo "Исправляем синтаксис..."
+          
+          # Создаем минимальный корректный build.gradle если текущий сломан
+          if ! grep -q "android {" app/build.gradle; then
+            echo "Создаем новый build.gradle с правильным синтаксисом..."
+            echo "apply plugin: 'com.android.application'" > app/build.gradle
+            echo "" >> app/build.gradle
+            echo "android {" >> app/build.gradle
+            echo "    compileSdkVersion 28" >> app/build.gradle
+            echo "    buildToolsVersion \"28.0.3\"" >> app/build.gradle
+            echo "" >> app/build.gradle
+            echo "    defaultConfig {" >> app/build.gradle
+            echo "        applicationId \"org.openxcom\"" >> app/build.gradle
+            echo "        minSdkVersion 16" >> app/build.gradle
+            echo "        targetSdkVersion 28" >> app/build.gradle
+            echo "        versionCode 1" >> app/build.gradle
+            echo "        versionName \"1.0\"" >> app/build.gradle
+            echo "" >> app/build.gradle
+            echo "        ndk {" >> app/build.gradle
+            echo "            abiFilters \"arm64-v8a\"" >> app/build.gradle
+            echo "        }" >> app/build.gradle
+            echo "    }" >> app/build.gradle
+            echo "" >> app/build.gradle
+            echo "    buildTypes {" >> app/build.gradle
+            echo "        release {" >> app/build.gradle
+            echo "            minifyEnabled false" >> app/build.gradle
+            echo "            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'" >> app/build.gradle
+            echo "        }" >> app/build.gradle
+            echo "    }" >> app/build.gradle
+            echo "" >> app/build.gradle
+            echo "    externalNativeBuild {" >> app/build.gradle
+            echo "        cmake {" >> app/build.gradle
+            echo "            path \"src/main/jni/CMakeLists.txt\"" >> app/build.gradle
+            echo "            version \"3.10.2\"" >> app/build.gradle
+            echo "        }" >> app/build.gradle
+            echo "    }" >> app/build.gradle
+            echo "}" >> app/build.gradle
+            echo "" >> app/build.gradle
+            echo "dependencies {" >> app/build.gradle
+            echo "    implementation fileTree(dir: 'libs', include: ['*.jar'])" >> app/build.gradle
+            echo "}" >> app/build.gradle
           else
-            # Если ndk блок есть, заменяем abiFilters
-            sed -i '/abiFilters/ s/.*/            abiFilters "arm64-v8a"/' app/build.gradle
+            echo "Используем существующий build.gradle, добавляем настройки arm64..."
+            # Проверяем и исправляем defaultConfig
+            if ! grep -q "ndk {" app/build.gradle; then
+              # Добавляем ndk блок после defaultConfig
+              sed -i '/defaultConfig {/,/}/ {
+                /}/i\
+        ndk {\
+            abiFilters "arm64-v8a"\
+        }
+              }' app/build.gradle
+            fi
           fi
           
-          # Способ 2: Устанавливаем abiFilters для externalNativeBuild если он существует
-          if grep -q "externalNativeBuild" app/build.gradle; then
-            sed -i '/externalNativeBuild/,/}/ {
-              /cmake {/a\                abiFilters "arm64-v8a"
-            }' app/build.gradle
-          fi
-          
-          # Удаляем дублирующиеся настройки ABI
-          echo "Текущая конфигурация ABI в build.gradle:"
-          grep -n "abiFilters\|ndk\|ABI" app/build.gradle || true
+          echo "=== Исправленный build.gradle (первые 40 строк) ==="
+          head -40 app/build.gradle
+        else
+          echo "app/build.gradle не найден, создаем новый..."
+          mkdir -p app
+          echo "apply plugin: 'com.android.application'" > app/build.gradle
+          echo "" >> app/build.gradle
+          echo "android {" >> app/build.gradle
+          echo "    compileSdkVersion 28" >> app/build.gradle
+          echo "    buildToolsVersion \"28.0.3\"" >> app/build.gradle
+          echo "" >> app/build.gradle
+          echo "    defaultConfig {" >> app/build.gradle
+          echo "        applicationId \"org.openxcom\"" >> app/build.gradle
+          echo "        minSdkVersion 16" >> app/build.gradle
+          echo "        targetSdkVersion 28" >> app/build.gradle
+          echo "        versionCode 1" >> app/build.gradle
+          echo "        versionName \"1.0\"" >> app/build.gradle
+          echo "" >> app/build.gradle
+          echo "        ndk {" >> app/build.gradle
+          echo "            abiFilters \"arm64-v8a\"" >> app/build.gradle
+          echo "        }" >> app/build.gradle
+          echo "    }" >> app/build.gradle
+          echo "" >> app/build.gradle
+          echo "    buildTypes {" >> app/build.gradle
+          echo "        release {" >> app/build.gradle
+          echo "            minifyEnabled false" >> app/build.gradle
+          echo "            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'" >> app/build.gradle
+          echo "        }" >> app/build.gradle
+          echo "    }" >> app/build.gradle
+          echo "" >> app/build.gradle
+          echo "    externalNativeBuild {" >> app/build.gradle
+          echo "        cmake {" >> app/build.gradle
+          echo "            path \"src/main/jni/CMakeLists.txt\"" >> app/build.gradle
+          echo "            version \"3.10.2\"" >> app/build.gradle
+          echo "        }" >> app/build.gradle
+          echo "    }" >> app/build.gradle
+          echo "}" >> app/build.gradle
+          echo "" >> app/build.gradle
+          echo "dependencies {" >> app/build.gradle
+          echo "    implementation fileTree(dir: 'libs', include: ['*.jar'])" >> app/build.gradle
+          echo "}" >> app/build.gradle
         fi
         
-        # Также создаем Application.mk для явного указания ABI
-        if [ -d "app/src/main/jni" ]; then
-          echo "Создаем Application.mk для arm64-v8a..."
-          echo "APP_ABI := arm64-v8a" > app/src/main/jni/Application.mk
-          echo "APP_PLATFORM := android-21" >> app/src/main/jni/Application.mk
-          echo "APP_STL := c++_static" >> app/src/main/jni/Application.mk
-          echo "APP_CPPFLAGS := -std=c++11 -frtti -fexceptions" >> app/src/main/jni/Application.mk
-        fi
+    - name: Create gradle.properties for arm64
+      run: |
+        echo "Создаем gradle.properties для arm64-v8a..."
+        echo "android.useDeprecatedNdk=true" > app/gradle.properties
+        echo "android.bundle.enableUncompressedNativeLibs=false" >> app/gradle.properties
+        
+    - name: Create Application.mk for arm64
+      run: |
+        echo "Создаем Application.mk для arm64-v8a..."
+        mkdir -p app/src/main/jni
+        echo "APP_ABI := arm64-v8a" > app/src/main/jni/Application.mk
+        echo "APP_PLATFORM := android-21" >> app/src/main/jni/Application.mk
+        echo "APP_STL := c++_static" >> app/src/main/jni/Application.mk
+        echo "APP_CPPFLAGS := -std=c++11 -frtti -fexceptions -Wno-error=unused-value -Wno-error=dangling-else" >> app/src/main/jni/Application.mk
         
     - name: Fix SDL1 to SDL2 compatibility issues
       run: |
@@ -164,11 +248,8 @@ jobs:
         # Восстанавливаем оригинальный макрос Log в Logger.h
         echo "Восстанавливаем оригинальный макрос Log..."
         if [ -f "src/Engine/Logger.h" ]; then
-          # Восстанавливаем оригинальный макрос Log на строке 69
-          sed -i '69s/#define Log(level) do { if (level <= Logger::reportingLevel()) { Logger().get(level); } } while (0)/#define Log(level) if (level > Logger::reportingLevel()) { } else Logger().get(level)/' src/Engine/Logger.h || true
-          
-          # Проверяем, есть ли другой формат макроса
-          sed -i '69s/#define Log(level) if (level <= Logger::reportingLevel()) { Logger().get(level); }/#define Log(level) if (level > Logger::reportingLevel()) { } else Logger().get(level)/' src/Engine/Logger.h || true
+          # Восстанавливаем оригинальный макрос Log
+          sed -i 's/#define Log(level) do { if (level <= Logger::reportingLevel()) { Logger().get(level); } } while (0)/#define Log(level) if (level > Logger::reportingLevel()) { } else Logger().get(level)/' src/Engine/Logger.h || true
           echo "Logger.h восстановлен"
         else
           echo "Logger.h не найден"
@@ -185,59 +266,66 @@ jobs:
           echo "AIModule.cpp не найден"
         fi
         
-    - name: Disable warnings as errors
+    - name: Update gradle wrapper
       run: |
-        echo "Отключаем трактовку предупреждений как ошибок..."
-        cd app
-        
-        # Проверяем существование build.gradle
-        if [ -f "build.gradle" ]; then
-          # Ищем строку с cppFlags и добавляем флаги
-          if grep -q "cppFlags" build.gradle; then
-            # Если уже есть cppFlags, добавляем к ним
-            sed -i '/cppFlags/ s/"-Werror"/"-Wno-error=unused-value -Wno-error=dangling-else -Wno-error"/' build.gradle || true
-            sed -i '/cppFlags/ s/""/"-Wno-error=unused-value -Wno-error=dangling-else -Wno-error"/' build.gradle || true
-          else
-            # Ищем externalNativeBuild и добавляем cppFlags
-            sed -i '/externalNativeBuild {/,/}/ s/cmake {/cmake {\n                cppFlags "-Wno-error=unused-value -Wno-error=dangling-else -Wno-error"/' build.gradle || true
-          fi
-          echo "build.gradle модифицирован"
+        echo "Обновляем Gradle wrapper до 4.10.3..."
+        if [ -f "gradle/wrapper/gradle-wrapper.properties" ]; then
+          sed -i 's/gradle-.*-bin.zip/gradle-4.10.3-bin.zip/' gradle/wrapper/gradle-wrapper.properties
+          echo "Gradle wrapper обновлен"
         else
-          echo "build.gradle не найден"
+          echo "gradle-wrapper.properties не найден, создаем..."
+          mkdir -p gradle/wrapper
+          echo "distributionBase=GRADLE_USER_HOME" > gradle/wrapper/gradle-wrapper.properties
+          echo "distributionPath=wrapper/dists" >> gradle/wrapper/gradle-wrapper.properties
+          echo "zipStoreBase=GRADLE_USER_HOME" >> gradle/wrapper/gradle-wrapper.properties
+          echo "zipStorePath=wrapper/dists" >> gradle/wrapper/gradle-wrapper.properties
+          echo "distributionUrl=https\://services.gradle.org/distributions/gradle-4.10.3-bin.zip" >> gradle/wrapper/gradle-wrapper.properties
         fi
         
-    - name: Build with Gradle 4.10.3 (arm64-v8a only)
+    - name: Build with Gradle
       run: |
-        echo "Собираем APK с Gradle 4.10.3 только для arm64-v8a..."
-        
-        # Устанавливаем конкретную версию Gradle wrapper
-        sed -i 's/gradle-.*-bin.zip/gradle-4.10.3-bin.zip/' gradle/wrapper/gradle-wrapper.properties
+        echo "Собираем APK с Gradle..."
         
         # Даем права на выполнение
         chmod +x gradlew
         
-        # Собираем Release APK только для arm64-v8a
-        # Используем свойство для ограничения ABI
-        ./gradlew clean assembleRelease \
-          -Pandroid.injected.build.abi=arm64-v8a \
-          -PAPP_ABI=arm64-v8a \
-          --no-daemon --stacktrace
+        # Проверяем конфигурацию Gradle
+        echo "Проверяем Gradle конфигурацию..."
+        ./gradlew --version
+        
+        # Очищаем и собираем
+        echo "Начинаем сборку APK..."
+        ./gradlew clean
+        
+        echo "Собираем Release APK для arm64-v8a..."
+        ./gradlew assembleRelease \
+          --no-daemon \
+          --stacktrace \
+          -Pandroid.injected.build.abi=arm64-v8a
+        
+    - name: Check build results
+      run: |
+        echo "Проверяем результаты сборки..."
+        if [ -d "app/build/outputs/apk" ]; then
+          echo "Найденные APK файлы:"
+          find app/build/outputs/apk -name "*.apk" -type f | xargs ls -la
+          
+          if [ $(find app/build/outputs/apk -name "*.apk" -type f | wc -l) -eq 0 ]; then
+            echo "ОШИБКА: APK файлы не собраны!"
+            echo "Содержимое app/build/outputs/apk:"
+            ls -la app/build/outputs/apk/
+            exit 1
+          fi
+        else
+          echo "ОШИБКА: Папка app/build/outputs/apk не существует!"
+          echo "Содержимое app/build:"
+          ls -la app/build/
+          exit 1
+        fi
         
     - name: Upload APK artifact
       uses: actions/upload-artifact@v4
       with:
-        name: BrutalAI-Android-APK-arm64-v8a
-        path: app/build/outputs/apk/release/*.apk
+        name: BrutalAI-Android-APK-arm64
+        path: app/build/outputs/apk/**/*.apk
         retention-days: 7
-        
-    - name: List build outputs
-      run: |
-        echo "Собранные файлы:"
-        find . -name "*.apk" -type f | xargs ls -la
-        
-        echo "Проверяем архитектуры в APK:"
-        if [ -f "app/build/outputs/apk/release/app-release.apk" ]; then
-          echo "Анализируем APK на предмет поддерживаемых архитектур..."
-          # Используем aapt для проверки native кода в APK
-          $ANDROID_HOME/build-tools/28.0.3/aapt list -v app/build/outputs/apk/release/app-release.apk | grep "lib/" || echo "Native библиотеки не найдены"
-        fi
