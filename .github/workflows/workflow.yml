@@ -101,7 +101,16 @@ jobs:
         echo "APP_ABI=arm64-v8a" >> gradle.properties
         
         # Модифицируем build.gradle для arm64 только
-        sed -i '/ndk {/!b;n;c\            abiFilters "arm64-v8a"' build.gradle || true
+        # 1. Удаляем все старые abiFilters
+        sed -i 's/abiFilters.*/abiFilters "arm64-v8a"/g' build.gradle
+        # 2. Добавляем abiFilters в defaultConfig если нет
+        if ! grep -q 'abiFilters' build.gradle; then
+          sed -i '/defaultConfig\s*{/,/}/ s/defaultConfig\s*{/defaultConfig {\n        ndk {\n            abiFilters "arm64-v8a"\n        }/' build.gradle || true
+        fi
+        # 3. Добавляем в externalNativeBuild->cmake
+        sed -i '/externalNativeBuild\s*{/,/}/ s/cmake\s*{/cmake {\n            abiFilters "arm64-v8a"/' build.gradle || true
+        # 4. Добавляем аргумент для CMake
+        sed -i '/cmake\s*{/!b;:a;n;/}/!ba; s/}/            arguments "-DANDROID_ABI=arm64-v8a"\n        }/' build.gradle || true
         cd ..
         
     - name: Fix SDL1 to SDL2 compatibility issues
@@ -121,6 +130,10 @@ jobs:
         # 3. Исправляем SDL_WarpMouse
         echo "Исправляем SDL_WarpMouse..."
         find . -type f \( -name "*.cpp" -o -name "*.h" -o -name "*.c" \) -exec sed -i 's/SDL_WarpMouse(/SDL_WarpMouseInWindow(NULL, /g' {} \;
+        
+        # 4. Исправляем SDL_WM_GrabInput для SDL2
+        echo "Исправляем SDL_WM_GrabInput..."
+        find . -type f \( -name "*.cpp" -o -name "*.h" -o -name "*.c" \) -exec sed -i 's/SDL_WM_GrabInput(\(.*\));/SDL_SetWindowGrab(SDL_GL_GetCurrentWindow(), \1 ? SDL_TRUE : SDL_FALSE);/g' {} \;
         
         echo "Проверяем исправления..."
         echo "Найдены SDL_Keycode:"
@@ -176,6 +189,22 @@ jobs:
           echo "build.gradle не найден"
         fi
         
+        # Также добавляем в CMakeLists.txt если нужно
+        cd ../app/src/main/jni
+        if [ -f "CMakeLists.txt" ]; then
+          sed -i '1iadd_compile_options(-Wno-error=unused-value -Wno-error=dangling-else -Wno-error)' CMakeLists.txt || true
+          echo "CMakeLists.txt модифицирован"
+        fi
+        
+    - name: Check build configuration
+      run: |
+        echo "Проверяем конфигурацию сборки..."
+        cd app
+        echo "Содержимое build.gradle (abiFilters):"
+        grep -n "abiFilters" build.gradle
+        echo "Содержимое gradle.properties:"
+        cat gradle.properties
+        
     - name: Build with Gradle 4.10.3
       run: |
         echo "Собираем APK с Gradle 4.10.3..."
@@ -186,8 +215,8 @@ jobs:
         # Даем права на выполнение
         chmod +x gradlew
         
-        # Собираем Release APK
-        ./gradlew clean assembleRelease --no-daemon --stacktrace
+        # Собираем Release APK с явным указанием архитектуры
+        ./gradlew clean assembleRelease -Pandroid.injected.build.abi=arm64-v8a --no-daemon --stacktrace
         
     - name: Upload APK artifact
       uses: actions/upload-artifact@v4
