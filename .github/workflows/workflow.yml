@@ -131,23 +131,28 @@ jobs:
         echo "Исправляем предупреждения компилятора..."
         cd app/src/main/jni/OpenXcom
         
-        # 1. Исправляем макрос Log в Logger.h
-        echo "Исправляем макрос Log..."
+        # Восстанавливаем оригинальный макрос Log в Logger.h
+        echo "Восстанавливаем оригинальный макрос Log..."
         if [ -f "src/Engine/Logger.h" ]; then
-          sed -i '69s/#define Log(level) if (level > Logger::reportingLevel()) { } else Logger().get(level)/#define Log(level) do { if (level <= Logger::reportingLevel()) { Logger().get(level); } } while (0)/' src/Engine/Logger.h
-          echo "Logger.h исправлен"
+          # Восстанавливаем оригинальный макрос Log на строке 69
+          sed -i '69s/#define Log(level) do { if (level <= Logger::reportingLevel()) { Logger().get(level); } } while (0)/#define Log(level) if (level > Logger::reportingLevel()) { } else Logger().get(level)/' src/Engine/Logger.h || true
+          
+          # Проверяем, есть ли другой формат макроса
+          sed -i '69s/#define Log(level) if (level <= Logger::reportingLevel()) { Logger().get(level); }/#define Log(level) if (level > Logger::reportingLevel()) { } else Logger().get(level)/' src/Engine/Logger.h || true
+          echo "Logger.h восстановлен"
         else
-          echo "Logger.h не найден, пропускаем"
+          echo "Logger.h не найден"
         fi
         
-        # 2. Закомментируем неиспользуемые строки в AIModule.cpp
-        echo "Закомментируем неиспользуемые значения..."
+        # Закомментируем неиспользуемые строки в AIModule.cpp
+        echo "Закомментируем неиспользуемые значения в AIModule.cpp..."
         if [ -f "src/Battlescape/AIModule.cpp" ]; then
+          # Закомментируем строки 5032 и 5033
           sed -i '5032s/cost\[j\]\.Time;/\/\/ cost[j].Time;/' src/Battlescape/AIModule.cpp
           sed -i '5033s/cost\[j\]\.Energy;/\/\/ cost[j].Energy;/' src/Battlescape/AIModule.cpp
           echo "AIModule.cpp исправлен"
         else
-          echo "AIModule.cpp не найден, пропускаем"
+          echo "AIModule.cpp не найден"
         fi
         
     - name: Disable warnings as errors
@@ -160,8 +165,8 @@ jobs:
           # Ищем строку с cppFlags и добавляем флаги
           if grep -q "cppFlags" build.gradle; then
             # Если уже есть cppFlags, добавляем к ним
-            sed -i '/cppFlags/ s/\"-Werror\"/\"-Wno-error=unused-value -Wno-error=dangling-else -Wno-error\"/' build.gradle || true
-            sed -i '/cppFlags/ s/\"\"/\"-Wno-error=unused-value -Wno-error=dangling-else -Wno-error\"/' build.gradle || true
+            sed -i '/cppFlags/ s/"-Werror"/"-Wno-error=unused-value -Wno-error=dangling-else -Wno-error"/' build.gradle || true
+            sed -i '/cppFlags/ s/""/"-Wno-error=unused-value -Wno-error=dangling-else -Wno-error"/' build.gradle || true
           else
             # Ищем externalNativeBuild и добавляем cppFlags
             sed -i '/externalNativeBuild {/,/}/ s/cmake {/cmake {\n                cppFlags "-Wno-error=unused-value -Wno-error=dangling-else -Wno-error"/' build.gradle || true
@@ -169,13 +174,6 @@ jobs:
           echo "build.gradle модифицирован"
         else
           echo "build.gradle не найден"
-        fi
-        
-        # Также добавляем в CMakeLists.txt если нужно
-        cd ../app/src/main/jni
-        if [ -f "CMakeLists.txt" ]; then
-          sed -i '1iadd_compile_options(-Wno-error=unused-value -Wno-error=dangling-else -Wno-error)' CMakeLists.txt || true
-          echo "CMakeLists.txt модифицирован"
         fi
         
     - name: Build with Gradle 4.10.3
