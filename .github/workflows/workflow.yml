@@ -1,4 +1,4 @@
-name: Build BrutalAI Android APK
+name: Build BrutalAI Android APK (arm64-v8a only)
 
 on:
   push:
@@ -95,23 +95,44 @@ jobs:
     - name: Configure build for arm64-v8a only
       run: |
         echo "Настраиваем сборку только для arm64-v8a..."
-        cd app
-        # Создаем gradle.properties для ограничения архитектур
-        echo "android.useDeprecatedNdk=true" > gradle.properties
-        echo "APP_ABI=arm64-v8a" >> gradle.properties
         
-        # Модифицируем build.gradle для arm64 только
-        # 1. Удаляем все старые abiFilters
-        sed -i 's/abiFilters.*/abiFilters "arm64-v8a"/g' build.gradle
-        # 2. Добавляем abiFilters в defaultConfig если нет
-        if ! grep -q 'abiFilters' build.gradle; then
-          sed -i '/defaultConfig\s*{/,/}/ s/defaultConfig\s*{/defaultConfig {\n        ndk {\n            abiFilters "arm64-v8a"\n        }/' build.gradle || true
+        # Создаем gradle.properties для ограничения архитектур
+        echo "android.useDeprecatedNdk=true" > app/gradle.properties
+        echo "APP_ABI=arm64-v8a" >> app/gradle.properties
+        
+        # Модифицируем app/build.gradle для сборки только arm64-v8a
+        if [ -f "app/build.gradle" ]; then
+          echo "Модифицируем build.gradle..."
+          
+          # Способ 1: Добавляем ndk блок в defaultConfig
+          if ! grep -q "ndk {" app/build.gradle; then
+            # Если ndk блока нет, добавляем его в defaultConfig
+            sed -i '/defaultConfig {/a\        ndk {\n            abiFilters "arm64-v8a"\n        }' app/build.gradle
+          else
+            # Если ndk блок есть, заменяем abiFilters
+            sed -i '/abiFilters/ s/.*/            abiFilters "arm64-v8a"/' app/build.gradle
+          fi
+          
+          # Способ 2: Устанавливаем abiFilters для externalNativeBuild если он существует
+          if grep -q "externalNativeBuild" app/build.gradle; then
+            sed -i '/externalNativeBuild/,/}/ {
+              /cmake {/a\                abiFilters "arm64-v8a"
+            }' app/build.gradle
+          fi
+          
+          # Удаляем дублирующиеся настройки ABI
+          echo "Текущая конфигурация ABI в build.gradle:"
+          grep -n "abiFilters\|ndk\|ABI" app/build.gradle || true
         fi
-        # 3. Добавляем в externalNativeBuild->cmake
-        sed -i '/externalNativeBuild\s*{/,/}/ s/cmake\s*{/cmake {\n            abiFilters "arm64-v8a"/' build.gradle || true
-        # 4. Добавляем аргумент для CMake
-        sed -i '/cmake\s*{/!b;:a;n;/}/!ba; s/}/            arguments "-DANDROID_ABI=arm64-v8a"\n        }/' build.gradle || true
-        cd ..
+        
+        # Также создаем Application.mk для явного указания ABI
+        if [ -d "app/src/main/jni" ]; then
+          echo "Создаем Application.mk для arm64-v8a..."
+          echo "APP_ABI := arm64-v8a" > app/src/main/jni/Application.mk
+          echo "APP_PLATFORM := android-21" >> app/src/main/jni/Application.mk
+          echo "APP_STL := c++_static" >> app/src/main/jni/Application.mk
+          echo "APP_CPPFLAGS := -std=c++11 -frtti -fexceptions" >> app/src/main/jni/Application.mk
+        fi
         
     - name: Fix SDL1 to SDL2 compatibility issues
       run: |
@@ -130,10 +151,6 @@ jobs:
         # 3. Исправляем SDL_WarpMouse
         echo "Исправляем SDL_WarpMouse..."
         find . -type f \( -name "*.cpp" -o -name "*.h" -o -name "*.c" \) -exec sed -i 's/SDL_WarpMouse(/SDL_WarpMouseInWindow(NULL, /g' {} \;
-        
-        # 4. Исправляем SDL_WM_GrabInput для SDL2
-        echo "Исправляем SDL_WM_GrabInput..."
-        find . -type f \( -name "*.cpp" -o -name "*.h" -o -name "*.c" \) -exec sed -i 's/SDL_WM_GrabInput(\(.*\));/SDL_SetWindowGrab(SDL_GL_GetCurrentWindow(), \1 ? SDL_TRUE : SDL_FALSE);/g' {} \;
         
         echo "Проверяем исправления..."
         echo "Найдены SDL_Keycode:"
@@ -189,25 +206,9 @@ jobs:
           echo "build.gradle не найден"
         fi
         
-        # Также добавляем в CMakeLists.txt если нужно
-        cd ../app/src/main/jni
-        if [ -f "CMakeLists.txt" ]; then
-          sed -i '1iadd_compile_options(-Wno-error=unused-value -Wno-error=dangling-else -Wno-error)' CMakeLists.txt || true
-          echo "CMakeLists.txt модифицирован"
-        fi
-        
-    - name: Check build configuration
+    - name: Build with Gradle 4.10.3 (arm64-v8a only)
       run: |
-        echo "Проверяем конфигурацию сборки..."
-        cd app
-        echo "Содержимое build.gradle (abiFilters):"
-        grep -n "abiFilters" build.gradle
-        echo "Содержимое gradle.properties:"
-        cat gradle.properties
-        
-    - name: Build with Gradle 4.10.3
-      run: |
-        echo "Собираем APK с Gradle 4.10.3..."
+        echo "Собираем APK с Gradle 4.10.3 только для arm64-v8a..."
         
         # Устанавливаем конкретную версию Gradle wrapper
         sed -i 's/gradle-.*-bin.zip/gradle-4.10.3-bin.zip/' gradle/wrapper/gradle-wrapper.properties
@@ -215,13 +216,17 @@ jobs:
         # Даем права на выполнение
         chmod +x gradlew
         
-        # Собираем Release APK с явным указанием архитектуры
-        ./gradlew clean assembleRelease -Pandroid.injected.build.abi=arm64-v8a --no-daemon --stacktrace
+        # Собираем Release APK только для arm64-v8a
+        # Используем свойство для ограничения ABI
+        ./gradlew clean assembleRelease \
+          -Pandroid.injected.build.abi=arm64-v8a \
+          -PAPP_ABI=arm64-v8a \
+          --no-daemon --stacktrace
         
     - name: Upload APK artifact
       uses: actions/upload-artifact@v4
       with:
-        name: BrutalAI-Android-APK
+        name: BrutalAI-Android-APK-arm64-v8a
         path: app/build/outputs/apk/release/*.apk
         retention-days: 7
         
@@ -229,3 +234,10 @@ jobs:
       run: |
         echo "Собранные файлы:"
         find . -name "*.apk" -type f | xargs ls -la
+        
+        echo "Проверяем архитектуры в APK:"
+        if [ -f "app/build/outputs/apk/release/app-release.apk" ]; then
+          echo "Анализируем APK на предмет поддерживаемых архитектур..."
+          # Используем aapt для проверки native кода в APK
+          $ANDROID_HOME/build-tools/28.0.3/aapt list -v app/build/outputs/apk/release/app-release.apk | grep "lib/" || echo "Native библиотеки не найдены"
+        fi
