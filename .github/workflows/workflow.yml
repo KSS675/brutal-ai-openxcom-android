@@ -340,12 +340,22 @@ jobs:
       with:
         name: BrutalAI-Unsigned-APK
 
-    # Ключевое изменение: используем готовый Action для настройки Android SDK
+    # Ключевое исправление: СНАЧАЛА устанавливаем JDK 17
+    - name: Set up JDK 17 for Android Tools
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+
+    # Исправленный шаг настройки Android SDK
     - name: Setup Android SDK and Build-Tools
       uses: android-actions/setup-android@v3
       with:
-        # Указываем конкретную версию build-tools для подписи
-        build-tools-version: "34.0.0"
+        # Используем правильный формат 'packages' вместо устаревшего 'build-tools-version'
+        packages: |
+          build-tools;34.0.0
+          platform-tools
+        accept-android-sdk-licenses: true
 
     - name: Decode Keystore from Secrets
       run: |
