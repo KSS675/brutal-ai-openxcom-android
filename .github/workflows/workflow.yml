@@ -108,7 +108,56 @@ jobs:
           # Создаем минимальный корректный build.gradle если текущий сломан
           if ! grep -q "android {" app/build.gradle; then
             echo "Создаем новый build.gradle с правильным синтаксисом..."
-            # ... (остальной код без изменений)
+            cat > app/build.gradle << 'EOF'
+apply plugin: 'com.android.application'
+
+android {
+    compileSdkVersion 28
+    buildToolsVersion "28.0.3"
+
+    defaultConfig {
+        applicationId "org.openxcom"
+        minSdkVersion 16
+        targetSdkVersion 28
+        versionCode 1
+        versionName "1.0"
+
+        ndk {
+            abiFilters "arm64-v8a"
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path "src/main/jni/CMakeLists.txt"
+            version "3.10.2"
+        }
+    }
+}
+
+dependencies {
+    implementation fileTree(dir: 'libs', include: ['*.jar'])
+}
+EOF
+          else
+            echo "Используем существующий build.gradle, добавляем настройки arm64..."
+            # Проверяем и исправляем defaultConfig
+            if ! grep -q "ndk {" app/build.gradle; then
+              # Добавляем ndk блок после defaultConfig
+              sed -i '/defaultConfig {/,/}/ {
+                /}/i\
+        ndk {\
+            abiFilters "arm64-v8a"\
+        }
+              }' app/build.gradle
+            fi
           fi
           
           echo "=== Исправленный build.gradle (первые 40 строк) ==="
@@ -116,14 +165,51 @@ jobs:
         else
           echo "app/build.gradle не найден, создаем новый..."
           mkdir -p app
-          # ... (остальной код без изменений)
+          cat > app/build.gradle << 'EOF'
+apply plugin: 'com.android.application'
+
+android {
+    compileSdkVersion 28
+    buildToolsVersion "28.0.3"
+
+    defaultConfig {
+        applicationId "org.openxcom"
+        minSdkVersion 16
+        targetSdkVersion 28
+        versionCode 1
+        versionName "1.0"
+
+        ndk {
+            abiFilters "arm64-v8a"
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path "src/main/jni/CMakeLists.txt"
+            version "3.10.2"
+        }
+    }
+}
+
+dependencies {
+    implementation fileTree(dir: 'libs', include: ['*.jar'])
+}
+EOF
         fi
         
     - name: Create gradle.properties for arm64
       run: |
         echo "Создаем gradle.properties для arm64-v8a..."
         echo "android.useDeprecatedNdk=true" > app/gradle.properties
-        echo "android.bundle.enableUncompressedNativelibs=false" >> app/gradle.properties
+        echo "android.bundle.enableUncompressedNativeLibs=false" >> app/gradle.properties
         
     - name: Create Application.mk for arm64
       run: |
@@ -191,11 +277,13 @@ jobs:
         else
           echo "gradle-wrapper.properties не найден, создаем..."
           mkdir -p gradle/wrapper
-          echo "distributionBase=GRADLE_USER_HOME" > gradle/wrapper/gradle-wrapper.properties
-          echo "distributionPath=wrapper/dists" >> gradle/wrapper/gradle-wrapper.properties
-          echo "zipStoreBase=GRADLE_USER_HOME" >> gradle/wrapper/gradle-wrapper.properties
-          echo "zipStorePath=wrapper/dists" >> gradle/wrapper/gradle-wrapper.properties
-          echo "distributionUrl=https\://services.gradle.org/distributions/gradle-4.10.3-bin.zip" >> gradle/wrapper/gradle-wrapper.properties
+          cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
+distributionBase=GRADLE_USER_HOME
+distributionPath=wrapper/dists
+zipStoreBase=GRADLE_USER_HOME
+zipStorePath=wrapper/dists
+distributionUrl=https\://services.gradle.org/distributions/gradle-4.10.3-bin.zip
+EOF
         fi
         
     - name: Build with Gradle
@@ -258,21 +346,67 @@ jobs:
       with:
         name: BrutalAI-Unsigned-APK
 
-    # Устанавливаем JDK 17 для совместимости с новыми Android SDK Tools
-    - name: Set up JDK 17 for Android Tools
-      uses: actions/setup-java@v4
-      with:
-        distribution: 'temurin'
-        java-version: '17'
+    # Отладочный шаг для проверки окружения
+    - name: Debug Environment
+      run: |
+        echo "Проверяем текущее окружение..."
+        echo "PATH: $PATH"
+        echo "ANDROID_HOME: $ANDROID_HOME"
+        echo "JAVA_HOME: $JAVA_HOME"
+        echo "Содержимое корневой директории:"
+        ls -la /
 
-    # ИСПРАВЛЕННЫЙ ШАГ: Правильный формат списка пакетов
-    - name: Setup Android SDK and Build-Tools
-      uses: android-actions/setup-android@v3
-      with:
-        # Пакеты теперь указаны в одной строке через пробел
-        packages: 'build-tools;34.0.0 platform-tools'
-        accept-android-sdk-licenses: true
-
+    # Настраиваем Android SDK с использованием проверенного метода
+    - name: Setup Android SDK for Signing
+      run: |
+        echo "Настраиваем Android SDK для подписи..."
+        
+        # Устанавливаем необходимые пакеты
+        sudo apt-get update
+        sudo apt-get install -y wget unzip
+        
+        # Создаем директорию для Android SDK
+        mkdir -p /tmp/android-sdk
+        cd /tmp/android-sdk
+        
+        # Скачиваем и устанавливаем Android SDK Tools
+        echo "Скачиваем Android SDK Tools..."
+        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+        unzip -q commandlinetools-linux-9477386_latest.zip
+        rm commandlinetools-linux-9477386_latest.zip
+        
+        # Настраиваем переменные окружения
+        echo "ANDROID_HOME=/tmp/android-sdk" >> $GITHUB_ENV
+        echo "ANDROID_SDK_ROOT=/tmp/android-sdk" >> $GITHUB_ENV
+        echo "PATH=/tmp/android-sdk/cmdline-tools/bin:$PATH" >> $GITHUB_ENV
+        
+        # Принимаем лицензии
+        echo "Принимаем лицензии Android SDK..."
+        yes | /tmp/android-sdk/cmdline-tools/bin/sdkmanager --licenses > /dev/null 2>&1 || true
+        
+        # Устанавливаем build-tools 34.0.0
+        echo "Устанавливаем build-tools 34.0.0..."
+        /tmp/android-sdk/cmdline-tools/bin/sdkmanager "build-tools;34.0.0" > /dev/null 2>&1
+        
+        echo "Проверяем установку..."
+        ls -la /tmp/android-sdk/build-tools/34.0.0/
+        
+    - name: Verify apksigner Installation
+      run: |
+        echo "Проверяем наличие apksigner..."
+        
+        # Проверяем несколько возможных путей
+        if [ -f "/tmp/android-sdk/build-tools/34.0.0/apksigner" ]; then
+          echo "apksigner найден по пути: /tmp/android-sdk/build-tools/34.0.0/apksigner"
+          echo "Проверяем версию:"
+          /tmp/android-sdk/build-tools/34.0.0/apksigner --version || echo "Не удалось проверить версию"
+        else
+          echo "ОШИБКА: apksigner не найден!"
+          echo "Содержимое build-tools директории:"
+          find /tmp/android-sdk/build-tools -name apksigner -type f 2>/dev/null || echo "apksigner не найден"
+          exit 1
+        fi
+        
     - name: Decode Keystore from Secrets
       run: |
         echo "Декодируем keystore из секрета..."
@@ -286,13 +420,13 @@ jobs:
         APK_FILE=$(find . -name "*.apk" -type f | head -1)
         echo "Найден файл: $APK_FILE"
         
-        # Создаем имя для подписанного APK
+        # Исправленный синтаксис для создания имени файла
         SIGNED_APK_NAME="BrutalAI-signed-$(date +%Y%m%d-%H%M%S).apk"
         echo "Имя подписанного файла: $SIGNED_APK_NAME"
         
         echo "Подписываем APK..."
-        # apksigner теперь доступен в PATH благодаря setup-android
-        apksigner sign \
+        # Явно указываем полный путь к apksigner
+        /tmp/android-sdk/build-tools/34.0.0/apksigner sign \
           --ks release-keystore.jks \
           --ks-key-alias "${{ secrets.KEY_ALIAS }}" \
           --ks-pass pass:"${{ secrets.KEYSTORE_PASSWORD }}" \
@@ -301,11 +435,14 @@ jobs:
           "$APK_FILE"
         
         echo "Проверяем подпись..."
-        apksigner verify --verbose "$SIGNED_APK_NAME"
+        /tmp/android-sdk/build-tools/34.0.0/apksigner verify --verbose "$SIGNED_APK_NAME"
         
         echo "Размеры файлов:"
         echo "Исходный: $(du -h "$APK_FILE" | cut -f1)"
         echo "Подписанный: $(du -h "$SIGNED_APK_NAME" | cut -f1)"
+        
+        echo "Проверяем созданные файлы:"
+        ls -la *.apk
         
     - name: Create GitHub Release
       if: github.event_name == 'push' && github.ref == 'refs/heads/brutal-ai'
