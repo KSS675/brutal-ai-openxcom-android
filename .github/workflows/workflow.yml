@@ -1,4 +1,4 @@
-name: Sign Existing APK (Simple)
+name: Sign Existing APK (Corrected)
 
 on:
   workflow_dispatch:
@@ -7,10 +7,6 @@ on:
         description: 'Run ID (e.g., 20215425684)'
         required: true
         default: '20215425684'
-      artifact_name:
-        description: 'Artifact name'
-        required: true  
-        default: 'BrutalAI-Android-APK-arm64'
 
 jobs:
   sign-apk:
@@ -20,113 +16,104 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
       
-    - name: Install Java 8 only (no Android SDK)
+    - name: Install dependencies
       run: |
-        echo "Устанавливаем только Java 8 для подписи..."
         sudo apt-get update
         sudo apt-get install -y openjdk-8-jre-headless
         
-    - name: Download artifact
+    - name: Download artifact with correct name
       uses: actions/download-artifact@v4
       with:
         run-id: ${{ github.event.inputs.artifact_run_id }}
-        name: ${{ github.event.inputs.artifact_name }}
+        name: 'BrutaIAI-Android-APK-arm64'  # Используем правильное имя с опечаткой
+        path: ./downloaded-apk
         
-    - name: Find and sign APK
+    - name: Check downloaded files
       run: |
-        echo "Начинаем подпись APK..."
+        echo "Содержимое папки downloaded-apk:"
+        ls -la ./downloaded-apk/
+        echo ""
+        echo "Ищем APK файлы:"
+        find ./downloaded-apk -name "*.apk" -type f
         
-        # Находим APK файл
-        APK_FILE=$(find . -name "*.apk" -type f | head -1)
+    - name: Find APK file
+      run: |
+        # Ищем APK в скачанной папке
+        APK_FILE=$(find ./downloaded-apk -name "*.apk" -type f | head -1)
         
         if [ -z "$APK_FILE" ]; then
           echo "APK файл не найден!"
-          echo "Содержимое текущей директории:"
-          ls -la
-          echo "Ищем все .apk файлы:"
-          find . -name "*.apk" -type f
+          echo "Пробуем искать в корневой папке..."
+          APK_FILE=$(find . -name "*.apk" -type f | head -1)
+        fi
+        
+        if [ -z "$APK_FILE" ]; then
+          echo "APK не найден нигде!"
           exit 1
         fi
         
         echo "Найден APK: $APK_FILE"
+        echo "APK_FILE=$APK_FILE" >> $GITHUB_ENV
+        ls -lh "$APK_FILE"
+        
+    - name: Sign APK
+      run: |
+        echo "Подписываем APK: ${{ env.APK_FILE }}"
+        
+        # Перемещаем APK в текущую директорию для удобства
+        cp "${{ env.APK_FILE }}" ./app-release.apk
+        APK_FILE="./app-release.apk"
+        
         echo "Размер APK:"
         ls -lh "$APK_FILE"
         
-        # Проверяем, подписан ли уже APK
-        if jarsigner -verify "$APK_FILE" > /dev/null 2>&1; then
-          echo "APK уже подписан!"
-          SIGNED_APK="$APK_FILE"
-        else
-          echo "APK не подписан, создаем keystore..."
-          
-          # Создаем временный keystore
-          keytool -genkey -v \
-            -keystore brutalaikeystore.jks \
-            -alias brutalai \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -storepass brutalaipass \
-            -keypass brutalaipass \
-            -dname "CN=BrutalAI, OU=OpenXcom, O=BrutalAI, L=Unknown, ST=Unknown, C=US"
-          
-          echo "Keystore создан"
-          
-          # Подписываем APK
-          echo "Подписываем APK..."
-          jarsigner -verbose \
-            -sigalg SHA1withRSA \
-            -digestalg SHA1 \
-            -keystore brutalaikeystore.jks \
-            -storepass brutalaipass \
-            -keypass brutalaipass \
-            "$APK_FILE" \
-            brutalai
-          
-          echo "APK подписан"
-          SIGNED_APK="$APK_FILE"
-        fi
+        # Создаем keystore
+        keytool -genkey -v \
+          -keystore brutalaikeystore.jks \
+          -alias brutalai \
+          -keyalg RSA \
+          -keysize 2048 \
+          -validity 10000 \
+          -storepass brutalaipass \
+          -keypass brutalaipass \
+          -dname "CN=BrutalAI, OU=OpenXcom, O=BrutalAI, L=Unknown, ST=Unknown, C=US"
+        
+        # Подписываем APK
+        jarsigner -verbose \
+          -sigalg SHA1withRSA \
+          -digestalg SHA1 \
+          -keystore brutalaikeystore.jks \
+          -storepass brutalaipass \
+          -keypass brutalaipass \
+          "$APK_FILE" \
+          brutalai
+        
+        # Переименовываем подписанный файл
+        SIGNED_APK="./brutalai-signed.apk"
+        mv "$APK_FILE" "$SIGNED_APK"
         
         # Проверяем подпись
         echo "Проверяем подпись..."
         if jarsigner -verify -verbose "$SIGNED_APK"; then
           echo "✓ APK успешно подписан!"
+          echo "SIGNED_APK=$SIGNED_APK" >> $GITHUB_ENV
         else
           echo "✗ Ошибка проверки подписи APK"
           exit 1
         fi
         
-        echo "Итоговый APK: $SIGNED_APK"
-        ls -lh "$SIGNED_APK"
-        
-        # Сохраняем имя файла
-        echo "SIGNED_APK_NAME=$(basename $SIGNED_APK)" >> $GITHUB_ENV
-        echo "SIGNED_APK_PATH=$SIGNED_APK" >> $GITHUB_ENV
-        
-    - name: Show APK info
-      run: |
-        echo "=== ИНФОРМАЦИЯ О ПОДПИСАННОМ APK ==="
-        echo "Файл: ${{ env.SIGNED_APK_NAME }}"
-        echo "Путь: ${{ env.SIGNED_APK_PATH }}"
-        echo "Размер:"
-        ls -lh "${{ env.SIGNED_APK_PATH }}"
-        
     - name: Upload signed APK
       uses: actions/upload-artifact@v4
       with:
-        name: BrutalAI-Signed-Release
-        path: ${{ env.SIGNED_APK_PATH }}
+        name: BrutalAI-Signed-APK
+        path: ${{ env.SIGNED_APK }}
         retention-days: 7
         
-    - name: Show final result
+    - name: Show success message
       run: |
-        echo "=== ПОДПИСЬ ЗАВЕРШЕНА ==="
+        echo "=== УСПЕХ ==="
         echo "✅ APK успешно подписан!"
-        echo "📦 Файл: ${{ env.SIGNED_APK_NAME }}"
-        echo "📥 Скачать можно будет в разделе Artifacts"
+        echo "📦 Имя артефакта: BrutalAI-Signed-APK"
+        echo "📥 Скачайте его из раздела Artifacts"
         echo ""
-        echo "Для установки на Android:"
-        echo "1. Скачайте файл из Artifacts"
-        echo "2. Перенесите на устройство"
-        echo "3. Включите 'Установку из неизвестных источников'"
-        echo "4. Установите APK"
+        echo "Примечание: оригинальный APK имел имя с опечаткой 'BrutaIAI'"
