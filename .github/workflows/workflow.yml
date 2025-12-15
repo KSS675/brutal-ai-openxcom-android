@@ -172,7 +172,7 @@ jobs:
           echo "    externalNativeBuild {" >> app/build.gradle
           echo "        cmake {" >> app/build.gradle
           echo "            path \"src/main/jni/CMakeLists.txt\"" >> app/build.gradle
-          echo "            version \"3.10.2\"" >> app/build.gradle
+          echo "            version \"3.31.6\"" >> app/build.gradle
           echo "        }" >> app/build.gradle
           echo "    }" >> app/build.gradle
           echo "}" >> app/build.gradle
@@ -233,7 +233,7 @@ jobs:
           echo "    externalNativeBuild {" >> app/build.gradle
           echo "        cmake {" >> app/build.gradle
           echo "            path \"src/main/jni/CMakeLists.txt\"" >> app/build.gradle
-          echo "            version \"3.10.2\"" >> app/build.gradle
+          echo "            version \"3.31.6\"" >> app/build.gradle
           echo "        }" >> app/build.gradle
           echo "    }" >> app/build.gradle
           echo "}" >> app/build.gradle
