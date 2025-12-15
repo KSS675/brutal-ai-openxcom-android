@@ -72,7 +72,7 @@ jobs:
     - name: Install Android platforms and build-tools
       run: |
         echo "Устанавливаем Android platform 28 и build-tools 28.0.3..."
-        $ANDROID_HOME/tools/bin/sdkmanager "platforms;android-28" "platform-tools" "build-tools;28.0.3"
+        $ANDROID_HOME/tools/bin/sdkmanager "platforms;android-28" "platform-tools" "build-tools;28.0.3" "cmake;3.10.2.4988404"
         
     - name: Download Android NDK 18b
       run: |
@@ -85,11 +85,21 @@ jobs:
         echo "NDK_HOME=$HOME/android-ndk-r18b" >> $GITHUB_ENV
         echo "PATH=$ANDROID_NDK_HOME:$PATH" >> $GITHUB_ENV
         
+    - name: Install CMake 3.10.2
+      run: |
+        echo "Устанавливаем CMake 3.10.2..."
+        # Удаляем системный CMake если он есть
+        which cmake && sudo apt-get remove -y cmake || true
+        
+        # Устанавливаем CMake 3.10.2 из Android SDK
+        echo "CMake установлен через Android SDK"
+        
     - name: Create local.properties
       run: |
         echo "Создаем local.properties..."
         echo "sdk.dir=$ANDROID_HOME" > local.properties
         echo "ndk.dir=$ANDROID_NDK_HOME" >> local.properties
+        echo "cmake.dir=$ANDROID_HOME/cmake/3.10.2.4988404" >> local.properties
         cat local.properties
         
     - name: Setup signing keystore
@@ -137,14 +147,9 @@ jobs:
           # Создаем новый build.gradle с подписью с использованием echo
           echo "Создаем новый build.gradle с настройками подписи..."
           
-          # Читаем существующий файл и проверяем, есть ли уже блок signingConfigs
-          if grep -q "signingConfigs" app/build.gradle; then
-            echo "В build.gradle уже есть signingConfigs, заменяем..."
-            # Удаляем старый блок signingConfigs если есть
-            sed -i '/signingConfigs {/,/}/d' app/build.gradle
-          fi
+          # Удаляем старый файл и создаем новый
+          rm -f app/build.gradle
           
-          # Создаем новый build.gradle с правильной структурой используя echo
           echo "apply plugin: 'com.android.application'" > app/build.gradle
           echo "" >> app/build.gradle
           echo "android {" >> app/build.gradle
@@ -198,7 +203,13 @@ jobs:
           echo "    externalNativeBuild {" >> app/build.gradle
           echo "        cmake {" >> app/build.gradle
           echo "            path \"src/main/jni/CMakeLists.txt\"" >> app/build.gradle
-          echo "            version \"3.10.2\"" >> app/build.gradle
+          echo "        }" >> app/build.gradle
+          echo "    }" >> app/build.gradle
+          echo "" >> app/build.gradle
+          echo "    // Отключаем сжатие native библиотек для совместимости" >> app/build.gradle
+          echo "    bundle {" >> app/build.gradle
+          echo "        abi {" >> app/build.gradle
+          echo "            enableSplit = false" >> app/build.gradle
           echo "        }" >> app/build.gradle
           echo "    }" >> app/build.gradle
           echo "}" >> app/build.gradle
@@ -266,7 +277,13 @@ jobs:
           echo "    externalNativeBuild {" >> app/build.gradle
           echo "        cmake {" >> app/build.gradle
           echo "            path \"src/main/jni/CMakeLists.txt\"" >> app/build.gradle
-          echo "            version \"3.10.2\"" >> app/build.gradle
+          echo "        }" >> app/build.gradle
+          echo "    }" >> app/build.gradle
+          echo "" >> app/build.gradle
+          echo "    // Отключаем сжатие native библиотек для совместимости" >> app/build.gradle
+          echo "    bundle {" >> app/build.gradle
+          echo "        abi {" >> app/build.gradle
+          echo "            enableSplit = false" >> app/build.gradle
           echo "        }" >> app/build.gradle
           echo "    }" >> app/build.gradle
           echo "}" >> app/build.gradle
@@ -280,7 +297,8 @@ jobs:
       run: |
         echo "Создаем gradle.properties для arm64-v8a..."
         echo "android.useDeprecatedNdk=true" > app/gradle.properties
-        echo "android.bundle.enableUncompressedNativeLibs=false" >> app/gradle.properties
+        # Убираем проблемную строку с enableUncompressedNativeLibs
+        echo "# android.bundle.enableUncompressedNativeLibs=false" >> app/gradle.properties
         
     - name: Create Application.mk for arm64
       run: |
@@ -290,6 +308,21 @@ jobs:
         echo "APP_PLATFORM := android-21" >> app/src/main/jni/Application.mk
         echo "APP_STL := c++_static" >> app/src/main/jni/Application.mk
         echo "APP_CPPFLAGS := -std=c++11 -frtti -fexceptions -Wno-error=unused-value -Wno-error=dangling-else" >> app/src/main/jni/Application.mk
+        
+    - name: Create CMakeLists.txt if not exists
+      run: |
+        echo "Проверяем наличие CMakeLists.txt..."
+        if [ ! -f "app/src/main/jni/CMakeLists.txt" ]; then
+          echo "Создаем базовый CMakeLists.txt..."
+          mkdir -p app/src/main/jni
+          echo "cmake_minimum_required(VERSION 3.10.2)" > app/src/main/jni/CMakeLists.txt
+          echo "project(openxcom)" >> app/src/main/jni/CMakeLists.txt
+          echo "" >> app/src/main/jni/CMakeLists.txt
+          echo "add_subdirectory(OpenXcom)" >> app/src/main/jni/CMakeLists.txt
+        else
+          echo "CMakeLists.txt уже существует"
+          cat app/src/main/jni/CMakeLists.txt
+        fi
         
     - name: Fix SDL1 to SDL2 compatibility issues
       run: |
@@ -353,6 +386,14 @@ jobs:
           echo "distributionUrl=https\://services.gradle.org/distributions/gradle-4.10.3-bin.zip" >> gradle/wrapper/gradle-wrapper.properties
         fi
         
+    - name: Verify CMake installation
+      run: |
+        echo "Проверяем установку CMake..."
+        echo "CMake из Android SDK:"
+        ls -la $ANDROID_HOME/cmake/ || echo "CMake не найден в Android SDK"
+        echo "Содержимое local.properties:"
+        cat local.properties
+        
     - name: Build with Gradle
       run: |
         echo "Собираем подписанный релизный APK с Gradle..."
@@ -376,34 +417,4 @@ jobs:
         
     - name: Check build results
       run: |
-        echo "Проверяем результаты сборки..."
-        if [ -d "app/build/outputs/apk" ]; then
-          echo "Найденные APK файлы:"
-          find app/build/outputs/apk -name "*.apk" -type f | xargs ls -la
-          
-          # Проверяем, подписан ли APK
-          echo "Проверяем подпись APK..."
-          for apk in $(find app/build/outputs/apk/release -name "*.apk" -type f); do
-            echo "Проверяем подпись $apk..."
-            jarsigner -verify -verbose "$apk" && echo "✅ APK подписан корректно" || echo "❌ Ошибка подписи APK"
-          done
-          
-          if [ $(find app/build/outputs/apk -name "*.apk" -type f | wc -l) -eq 0 ]; then
-            echo "ОШИБКА: APK файлы не собраны!"
-            echo "Содержимое app/build/outputs/apk:"
-            ls -la app/build/outputs/apk/
-            exit 1
-          fi
-        else
-          echo "ОШИБКА: Папка app/build/outputs/apk не существует!"
-          echo "Содержимое app/build:"
-          ls -la app/build/
-          exit 1
-        fi
-        
-    - name: Upload APK artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: BrutalAI-Android-Signed-APK-arm64
-        path: app/build/outputs/apk/**/*release*.apk
-        retention-days: 7
+        echo "Проверяем резу
