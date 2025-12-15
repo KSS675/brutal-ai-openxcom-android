@@ -339,12 +339,14 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         name: BrutalAI-Unsigned-APK
-        
-    - name: Setup Android Build Tools for signing
-      run: |
-        echo "Устанавливаем Android Build-Tools 34.0.0 для подписи..."
-        $ANDROID_HOME/tools/bin/sdkmanager "build-tools;34.0.0"
-        
+
+    # Ключевое изменение: используем готовый Action для настройки Android SDK
+    - name: Setup Android SDK and Build-Tools
+      uses: android-actions/setup-android@v3
+      with:
+        # Указываем конкретную версию build-tools для подписи
+        build-tools-version: "34.0.0"
+
     - name: Decode Keystore from Secrets
       run: |
         echo "Декодируем keystore из секрета..."
@@ -363,7 +365,8 @@ jobs:
         echo "Имя подписанного файла: $SIGNED_APK_NAME"
         
         echo "Подписываем APK..."
-        $ANDROID_HOME/build-tools/34.0.0/apksigner sign \
+        # Теперь apksigner доступен в PATH благодаря setup-android
+        apksigner sign \
           --ks release-keystore.jks \
           --ks-key-alias "${{ secrets.KEY_ALIAS }}" \
           --ks-pass pass:"${{ secrets.KEYSTORE_PASSWORD }}" \
@@ -372,7 +375,7 @@ jobs:
           "$APK_FILE"
         
         echo "Проверяем подпись..."
-        $ANDROID_HOME/build-tools/34.0.0/apksigner verify --verbose "$SIGNED_APK_NAME"
+        apksigner verify --verbose "$SIGNED_APK_NAME"
         
         echo "Размеры файлов:"
         echo "Исходный: $(du -h "$APK_FILE" | cut -f1)"
