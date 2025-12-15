@@ -1,301 +1,75 @@
-name: Build and Sign BrutalAI Android APK (arm64-v8a only)
+name: Sign Existing APK from Artifacts
 
 on:
-  push:
-    branches: [ brutal-ai ]
-  pull_request:
-    branches: [ brutal-ai ]
   workflow_dispatch:
+    inputs:
+      artifact_run_id:
+        description: 'Run ID of the workflow with unsigned APK'
+        required: true
+        default: '20215425684'
+      artifact_name:
+        description: 'Name of the artifact to download'
+        required: true
+        default: 'BrutalAI-Android-APK-arm64'
 
 jobs:
-  build:
-    runs-on: ubuntu-22.04
+  sign-apk:
+    runs-on: ubuntu-latest
     
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-      with:
-        submodules: recursive
-        ref: brutal-ai
-        
-    - name: List directory contents
-      run: |
-        echo "Содержимое директории:"
-        ls -la
-        echo "Содержимое app/src/main/jni:"
-        ls -la app/src/main/jni/ || echo "Папка не найдена"
-        
-    - name: Configure Git submodule to android branch
-      run: |
-        echo "Проверяем наличие подмодуля OpenXcom в app/src/main/jni..."
-        if [ -d "app/src/main/jni/OpenXcom" ]; then
-          echo "Переключаем сабмодуль на ветку android..."
-          cd app/src/main/jni/OpenXcom
-          git checkout android
-          git pull origin android
-          cd ../../../../..
-        else
-          echo "ОШИБКА: Подмодуль OpenXcom не найден!"
-          echo "Содержимое app/src/main/jni:"
-          ls -la app/src/main/jni/
-          exit 1
-        fi
-        
+      
     - name: Set up JDK 8
       run: |
-        echo "Устанавливаем Java 8..."
+        echo "Устанавливаем Java 8 для подписи..."
         sudo apt-get update
         sudo apt-get install -y openjdk-8-jdk
-        echo "JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64" >> $GITHUB_ENV
         
-    - name: Setup Android SDK
+    - name: Setup Android SDK (for zipalign)
       run: |
-        echo "Устанавливаем Android SDK..."
+        echo "Устанавливаем Android SDK для zipalign..."
         cd $HOME
         mkdir -p android-sdk
         cd android-sdk
         wget -q https://dl.google.com/android/repository/sdk-tools-linux-4333796.zip
         unzip -q sdk-tools-linux-4333796.zip
         rm sdk-tools-linux-4333796.zip
-        
         chmod -R +x tools/bin/
-        
         echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
-        echo "PATH=$ANDROID_HOME/tools/bin:$ANDROID_HOME/platform-tools:$PATH" >> $GITHUB_ENV
+        echo "PATH=$ANDROID_HOME/tools/bin:$PATH" >> $GITHUB_ENV
         
     - name: Accept Android licenses
       run: |
-        echo "Принимаем лицензии Android SDK..."
         yes | $ANDROID_HOME/tools/bin/sdkmanager --licenses || true
         
-    - name: Install Android platforms and build-tools
+    - name: Install Android build-tools
       run: |
-        echo "Устанавливаем Android platform 28 и build-tools 28.0.3..."
-        $ANDROID_HOME/tools/bin/sdkmanager "platforms;android-28" "platform-tools" "build-tools;28.0.3"
+        $ANDROID_HOME/tools/bin/sdkmanager "platform-tools" "build-tools;28.0.3"
         
-    - name: Download Android NDK 18b
+    - name: Download artifact from specified run
+      uses: actions/download-artifact@v4
+      with:
+        run-id: ${{ github.event.inputs.artifact_run_id }}
+        name: ${{ github.event.inputs.artifact_name }}
+        path: ./downloaded-artifacts
+        
+    - name: List downloaded artifacts
       run: |
-        echo "Скачиваем Android NDK 18b..."
-        cd $HOME
-        wget -q https://dl.google.com/android/repository/android-ndk-r18b-linux-x86_64.zip
-        unzip -q android-ndk-r18b-linux-x86_64.zip
-        rm android-ndk-r18b-linux-x86_64.zip
-        echo "ANDROID_NDK_HOME=$HOME/android-ndk-r18b" >> $GITHUB_ENV
-        echo "NDK_HOME=$HOME/android-ndk-r18b" >> $GITHUB_ENV
-        echo "PATH=$ANDROID_NDK_HOME:$PATH" >> $GITHUB_ENV
-        
-    - name: Create local.properties
-      run: |
-        echo "Создаем local.properties..."
-        echo "sdk.dir=$ANDROID_HOME" > local.properties
-        echo "ndk.dir=$ANDROID_NDK_HOME" >> local.properties
-        
-    - name: Install Gradle 5.0 manually
-      run: |
-        echo "Устанавливаем Gradle 5.0 вручную..."
-        
-        cd /tmp
-        
-        # Пробуем разные источники для Gradle 5.0
-        echo "Пробуем скачать Gradle 5.0 с разных источников..."
-        
-        # Источник 1: Официальный сайт
-        if ! wget -q https://services.gradle.org/distributions/gradle-5.0-bin.zip; then
-          echo "Не удалось с официального сайта, пробуем альтернативный источник..."
-          
-          # Источник 2: Archive.org (часто есть старые версии)
-          if ! wget -q https://github.com/gradle/gradle/releases/download/v5.0.0/gradle-5.0-bin.zip; then
-            echo "Не удалось с GitHub releases, пробуем Tencent mirror..."
-            
-            # Источник 3: Tencent mirror
-            wget -q https://mirrors.cloud.tencent.com/gradle/gradle-5.0-bin.zip || echo "Не удалось скачать Gradle 5.0"
-          fi
-        fi
-        
-        if [ -f "gradle-5.0-bin.zip" ]; then
-          echo "Распаковываем Gradle 5.0..."
-          sudo mkdir -p /opt/gradle
-          sudo unzip -d /opt/gradle gradle-5.0-bin.zip
-          echo "GRADLE_HOME=/opt/gradle/gradle-5.0" >> $GITHUB_ENV
-          echo "PATH=/opt/gradle/gradle-5.0/bin:$PATH" >> $GITHUB_ENV
-          echo "Gradle 5.0 установлен"
-          
-          # Проверяем установку
-          /opt/gradle/gradle-5.0/bin/gradle --version
-        else
-          echo "ОШИБКА: Не удалось скачать Gradle 5.0! Пробуем Gradle 4.6..."
-          
-          # Пробуем Gradle 4.6 как запасной вариант
-          wget -q https://services.gradle.org/distributions/gradle-4.6-bin.zip
-          if [ -f "gradle-4.6-bin.zip" ]; then
-            sudo mkdir -p /opt/gradle
-            sudo unzip -d /opt/gradle gradle-4.6-bin.zip
-            echo "GRADLE_HOME=/opt/gradle/gradle-4.6" >> $GITHUB_ENV
-            echo "PATH=/opt/gradle/gradle-4.6/bin:$PATH" >> $GITHUB_ENV
-            echo "Gradle 4.6 установлен как запасной вариант"
-          else
-            echo "ОШИБКА: Не удалось скачать ни Gradle 5.0, ни Gradle 4.6!"
-            exit 1
-          fi
-        fi
-        
-    - name: Create updated build.gradle for Gradle 5.0
-      run: |
-        echo "Создаем build.gradle совместимый с Gradle 5.0..."
-        mkdir -p app
-        
-        # Проверяем, какой Gradle установлен
-        GRADLE_VERSION=$(gradle --version | grep "Gradle" | head -1 | awk '{print $2}')
-        echo "Используется Gradle версии: $GRADLE_VERSION"
-        
-        # Создаем build.gradle с учетом версии Gradle
-        echo "// Gradle version: $GRADLE_VERSION" > app/build.gradle
-        echo "// Built with Android SDK 28" >> app/build.gradle
-        echo "" >> app/build.gradle
-        echo "apply plugin: 'com.android.application'" >> app/build.gradle
-        echo "" >> app/build.gradle
-        echo "android {" >> app/build.gradle
-        echo "    compileSdkVersion 28" >> app/build.gradle
-        echo "    buildToolsVersion \"28.0.3\"" >> app/build.gradle
-        echo "" >> app/build.gradle
-        echo "    defaultConfig {" >> app/build.gradle
-        echo "        applicationId \"org.openxcom\"" >> app/build.gradle
-        echo "        minSdkVersion 16" >> app/build.gradle
-        echo "        targetSdkVersion 28" >> app/build.gradle
-        echo "        versionCode 1" >> app/build.gradle
-        echo "        versionName \"1.0\"" >> app/build.gradle
-        echo "" >> app/build.gradle
-        echo "        ndk {" >> app/build.gradle
-        echo "            abiFilters \"arm64-v8a\"" >> app/build.gradle
-        echo "        }" >> app/build.gradle
-        echo "        " >> app/build.gradle
-        echo "        // Для Gradle 5.0 и выше" >> app/build.gradle
-        echo "        externalNativeBuild {" >> app/build.gradle
-        echo "            cmake {" >> app/build.gradle
-        echo "                cppFlags \"-std=c++11 -frtti -fexceptions -Wno-error=unused-value -Wno-error=dangling-else\"" >> app/build.gradle
-        echo "                arguments \"-DANDROID_STL=c++_static\"" >> app/build.gradle
-        echo "            }" >> app/build.gradle
-        echo "        }" >> app/build.gradle
-        echo "    }" >> app/build.gradle
-        echo "" >> app/build.gradle
-        echo "    buildTypes {" >> app/build.gradle
-        echo "        release {" >> app/build.gradle
-        echo "            minifyEnabled false" >> app/build.gradle
-        echo "            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'" >> app/build.gradle
-        echo "        }" >> app/build.gradle
-        echo "    }" >> app/build.gradle
-        echo "" >> app/build.gradle
-        echo "    externalNativeBuild {" >> app/build.gradle
-        echo "        cmake {" >> app/build.gradle
-        echo "            path \"src/main/jni/CMakeLists.txt\"" >> app/build.gradle
-        echo "            version \"3.10.2\"" >> app/build.gradle
-        echo "        }" >> app/build.gradle
-        echo "    }" >> app/build.gradle
-        echo "" >> app/build.gradle
-        echo "    // Для отключения проверки устаревших функций" >> app/build.gradle
-        echo "    lintOptions {" >> app/build.gradle
-        echo "        checkReleaseBuilds false" >> app/build.gradle
-        echo "        abortOnError false" >> app/build.gradle
-        echo "    }" >> app/build.gradle
-        echo "}" >> app/build.gradle
-        echo "" >> app/build.gradle
-        echo "dependencies {" >> app/build.gradle
-        echo "    implementation fileTree(dir: 'libs', include: ['*.jar'])" >> app/build.gradle
-        echo "}" >> app/build.gradle
-        
-    - name: Create gradle.properties for Gradle 5.0
-      run: |
-        echo "Создаем gradle.properties для Gradle 5.0..."
-        echo "# Конфигурация для Android и NDK" > app/gradle.properties
-        echo "android.useDeprecatedNdk=true" >> app/gradle.properties
-        echo "android.enableD8=true" >> app/gradle.properties
-        echo "android.enableR8=false" >> app/gradle.properties
-        echo "org.gradle.jvmargs=-Xmx2048m -XX:MaxMetaspaceSize=512m" >> app/gradle.properties
-        echo "org.gradle.parallel=true" >> app/gradle.properties
-        echo "org.gradle.daemon=false" >> app/gradle.properties
-        
-    - name: Create Application.mk for arm64
-      run: |
-        echo "Создаем Application.mk..."
-        mkdir -p app/src/main/jni
-        echo "APP_ABI := arm64-v8a" > app/src/main/jni/Application.mk
-        echo "APP_PLATFORM := android-21" >> app/src/main/jni/Application.mk
-        echo "APP_STL := c++_static" >> app/src/main/jni/Application.mk
-        echo "APP_CPPFLAGS := -std=c++11 -frtti -fexceptions -Wno-error=unused-value -Wno-error=dangling-else" >> app/src/main/jni/Application.mk
-        
-    - name: Fix SDL1 to SDL2 compatibility issues
-      run: |
-        echo "Исправляем проблемы совместимости SDL1 и SDL2..."
-        cd app/src/main/jni/OpenXcom
-        
-        find . -type f \( -name "*.h" -o -name "*.cpp" -o -name "*.hpp" -o -name "*.inc" \) -exec sed -i 's/SDLKey/SDL_Keycode/g' {} \;
-        find . -type f \( -name "*.cpp" -o -name "*.h" -o -name "*.c" \) -exec sed -i 's/SDL_BUTTON_WHEELUP/4/g' {} \;
-        find . -type f \( -name "*.cpp" -o -name "*.h" -o -name "*.c" \) -exec sed -i 's/SDL_BUTTON_WHEELDOWN/5/g' {} \;
-        find . -type f \( -name "*.cpp" -o -name "*.h" -o -name "*.c" \) -exec sed -i 's/SDL_WarpMouse(/SDL_WarpMouseInWindow(NULL, /g' {} \;
-        
-    - name: Fix warnings in BrutalAI
-      run: |
-        echo "Исправляем предупреждения компилятора..."
-        cd app/src/main/jni/OpenXcom
-        
-        if [ -f "src/Engine/Logger.h" ]; then
-          sed -i 's/#define Log(level) do { if (level <= Logger::reportingLevel()) { Logger().get(level); } } while (0)/#define Log(level) if (level > Logger::reportingLevel()) { } else Logger().get(level)/' src/Engine/Logger.h || true
-        fi
-        
-        if [ -f "src/Battlescape/AIModule.cpp" ]; then
-          sed -i '5032s/cost\[j\]\.Time;/\/\/ cost[j].Time;/' src/Battlescape/AIModule.cpp
-          sed -i '5033s/cost\[j\]\.Energy;/\/\/ cost[j].Energy;/' src/Battlescape/AIModule.cpp
-        fi
-        
-    - name: Build APK with Gradle
-      run: |
-        echo "Собираем APK с Gradle..."
-        
-        # Проверяем версию Gradle
-        echo "=== Информация о Gradle ==="
-        gradle --version
-        
-        echo "Переходим в директорию проекта..."
-        cd app
-        
-        echo "Очищаем проект..."
-        gradle clean
-        
-        echo "Проверяем задачи Gradle..."
-        gradle tasks
-        
-        echo "Собираем Release APK..."
-        gradle assembleRelease \
-          --no-daemon \
-          --stacktrace \
-          --info \
-          --warning-mode all
-        
-        echo "Сборка завершена. Проверяем APK..."
-        find build/outputs/apk -name "*.apk" -type f | xargs ls -la
-        
-        # Сохраняем путь к APK для следующего шага
-        APK_FILE=$(find build/outputs/apk/release -name "*.apk" | head -1)
-        if [ -n "$APK_FILE" ]; then
-          echo "APK_FILE=$APK_FILE" >> $GITHUB_ENV
-        fi
+        echo "Скачанные артефакты:"
+        find ./downloaded-artifacts -type f -name "*.apk" | xargs ls -la
         
     - name: Sign APK if not signed
       run: |
         echo "Проверяем и подписываем APK..."
         
-        # Используем сохраненный путь или ищем APK
-        if [ -n "$APK_FILE" ] && [ -f "$APK_FILE" ]; then
-          echo "Используем найденный ранее APK: $APK_FILE"
-        else
-          # Ищем любой APK в папке release
-          APK_FILE=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
-        fi
+        # Ищем APK в скачанных артефактах
+        APK_FILE=$(find ./downloaded-artifacts -name "*.apk" | head -1)
         
-        if [ -z "$APK_FILE" ] || [ ! -f "$APK_FILE" ]; then
-          echo "APK не найден!"
-          echo "Содержимое app/build/outputs/apk:"
-          find app/build/outputs/apk -type f 2>/dev/null || echo "Папка не найдена"
+        if [ -z "$APK_FILE" ]; then
+          echo "APK не найден в скачанных артефактах!"
+          echo "Содержимое директории downloaded-artifacts:"
+          ls -la ./downloaded-artifacts/
           exit 1
         fi
         
@@ -308,7 +82,7 @@ jobs:
         else
           echo "APK не подписан, подписываем..."
           
-          # Создаем временный keystore
+          # Создаем простой keystore
           keytool -genkey -v \
             -keystore temp.keystore \
             -alias androidkey \
@@ -317,10 +91,9 @@ jobs:
             -validity 10000 \
             -storepass android \
             -keypass android \
-            -dname "CN=Android, OU=Android, O=Android, L=Unknown, ST=Unknown, C=US"
+            -dname "CN=BrutalAI, OU=Android, O=BrutalAI, L=Unknown, ST=Unknown, C=US"
           
-          # Подписываем APK
-          echo "Подписываем APK..."
+          # Подписываем
           jarsigner -verbose \
             -sigalg SHA1withRSA \
             -digestalg SHA1 \
@@ -332,21 +105,21 @@ jobs:
           
           echo "APK подписан"
           
-          # Оптимизируем с помощью zipalign
+          # Создаем путь для подписанного APK
           APK_DIR=$(dirname "$APK_FILE")
-          APK_BASENAME=$(basename "$APK_FILE" .apk)
-          SIGNED_APK="$APK_DIR/${APK_BASENAME}-signed.apk"
+          APK_NAME=$(basename "$APK_FILE" .apk)
+          SIGNED_APK="$APK_DIR/${APK_NAME}-signed.apk"
           
+          # Используем zipalign для оптимизации
           echo "Оптимизируем APK с помощью zipalign..."
           $ANDROID_HOME/build-tools/28.0.3/zipalign -v 4 "$APK_FILE" "$SIGNED_APK"
           
-          # Проверяем выравнивание
-          echo "Проверяем выравнивание..."
-          $ANDROID_HOME/build-tools/28.0.3/zipalign -c 4 "$SIGNED_APK"
+          echo "Исходный файл: $APK_FILE"
+          echo "Подписанный файл: $SIGNED_APK"
         fi
         
-        # Проверяем подпись
-        echo "Проверяем подпись итогового APK..."
+        # Проверяем результат
+        echo "Проверяем подпись..."
         if jarsigner -verify -verbose "$SIGNED_APK"; then
           echo "✓ APK успешно подписан и проверен"
         else
@@ -354,25 +127,19 @@ jobs:
           exit 1
         fi
         
-        echo "Финальный APK:"
-        ls -lh "$SIGNED_APK"
-        
         # Сохраняем путь к подписанному APK
         echo "SIGNED_APK_PATH=$SIGNED_APK" >> $GITHUB_ENV
         
     - name: Upload signed APK artifact
       uses: actions/upload-artifact@v4
       with:
-        name: BrutalAI-Signed-APK-Gradle5
+        name: BrutalAI-Signed-APK
         path: ${{ env.SIGNED_APK_PATH }}
         retention-days: 7
         
     - name: Show final result
       run: |
-        echo "=== СБОРКА УСПЕШНО ЗАВЕРШЕНА ==="
-        echo "Версия Gradle:"
-        gradle --version | grep "Gradle"
-        echo ""
+        echo "=== ПОДПИСЬ УСПЕШНО ЗАВЕРШЕНА ==="
         echo "Подписанный APK: ${{ env.SIGNED_APK_PATH }}"
-        echo "APK готов к установке на Android устройства (arm64-v8a)"
-        echo "Артефакт: BrutalAI-Signed-APK-Gradle5"
+        echo "APK готов к установке на Android устройства"
+        echo "Артефакт: BrutalAI-Signed-APK"
