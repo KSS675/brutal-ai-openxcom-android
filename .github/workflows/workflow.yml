@@ -41,7 +41,7 @@ jobs:
         
     - name: Set up JDK 8
       run: |
-        echo "Устанавливаем Java 8..."
+        echo "Устанавливаем Java 8 для сборки проекта..."
         sudo apt-get update
         sudo apt-get install -y openjdk-8-jdk
         echo "JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64" >> $GITHUB_ENV
@@ -186,22 +186,22 @@ jobs:
           echo "" >> app/build.gradle
           echo "    buildTypes {" >> app/build.gradle
           echo "        release {" >> app/build.gradle
-          echo "            minifyEnabled false" >> app/build.gradle
-          echo "            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'" >> app/build.gradle
-          echo "        }" >> app/build.gradle
-          echo "    }" >> app/build.gradle
-          echo "" >> app/build.gradle
-          echo "    externalNativeBuild {" >> app/build.gradle
-          echo "        cmake {" >> app/build.gradle
-          echo "            path \"src/main/jni/CMakeLists.txt\"" >> app/build.gradle
-          echo "            version \"3.10.2\"" >> app/build.gradle
-          echo "        }" >> app/build.gradle
-          echo "    }" >> app/build.gradle
-          echo "}" >> app/build.gradle
-          echo "" >> app/build.gradle
-          echo "dependencies {" >> app/build.gradle
-          echo "    implementation fileTree(dir: 'libs', include: ['*.jar'])" >> app/build.gradle
-          echo "}" >> app/build.gradle
+            echo "            minifyEnabled false" >> app/build.gradle
+            echo "            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'" >> app/build.gradle
+            echo "        }" >> app/build.gradle
+            echo "    }" >> app/build.gradle
+            echo "" >> app/build.gradle
+            echo "    externalNativeBuild {" >> app/build.gradle
+            echo "        cmake {" >> app/build.gradle
+            echo "            path \"src/main/jni/CMakeLists.txt\"" >> app/build.gradle
+            echo "            version \"3.10.2\"" >> app/build.gradle
+            echo "        }" >> app/build.gradle
+            echo "    }" >> app/build.gradle
+            echo "}" >> app/build.gradle
+            echo "" >> app/build.gradle
+            echo "dependencies {" >> app/build.gradle
+            echo "    implementation fileTree(dir: 'libs', include: ['*.jar'])" >> app/build.gradle
+            echo "}" >> app/build.gradle
         fi
         
     - name: Create gradle.properties for arm64
@@ -343,30 +343,48 @@ jobs:
       with:
         name: BrutalAI-Unsigned-APK
 
-    # Новый шаг: Установка Android SDK и Build-Tools
-    - name: Install Android SDK and Build-Tools
+    # Ключевое исправление: устанавливаем Java 17 для новых версий Android SDK
+    - name: Set up JDK 17 for Android SDK Tools
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+        
+    # Альтернативный способ: устанавливаем Java 17 через apt
+    - name: Install Java 17
       run: |
-        echo "Устанавливаем Android SDK и Build-Tools 34.0.0..."
+        echo "Устанавливаем Java 17 для совместимости с Android SDK Tools..."
+        sudo apt-get update
+        sudo apt-get install -y openjdk-17-jdk
+        echo "JAVA_HOME_17=/usr/lib/jvm/java-17-openjdk-amd64" >> $GITHUB_ENV
+        echo "PATH=/usr/lib/jvm/java-17-openjdk-amd64/bin:$PATH" >> $GITHUB_ENV
+
+    # Установка Android SDK с использованием Java 17
+    - name: Install Android Build-Tools 34.0.0
+      run: |
+        echo "Устанавливаем Android Build-Tools 34.0.0 с использованием Java 17..."
+        
+        # Проверяем версию Java
+        echo "Версия Java:"
+        java -version
         
         # Создаем директорию для Android SDK
         export ANDROID_HOME_SIGN=/tmp/android-sdk-sign
         mkdir -p $ANDROID_HOME_SIGN
         
         # Устанавливаем необходимые пакеты
-        sudo apt-get update
         sudo apt-get install -y wget unzip
         
-        # Скачиваем Android Command Line Tools
-        echo "Скачиваем Android Command Line Tools..."
-        cd /tmp
-        wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
-        unzip -q commandlinetools-linux-11076708_latest.zip -d $ANDROID_HOME_SIGN/cmdline-tools
-        mv $ANDROID_HOME_SIGN/cmdline-tools/cmdline-tools $ANDROID_HOME_SIGN/cmdline-tools/latest
-        rm commandlinetools-linux-11076708_latest.zip
+        # Используем старые SDK Tools, которые совместимы с Java 8/11
+        echo "Скачиваем старые SDK Tools (совместимые с Java 8)..."
+        cd $ANDROID_HOME_SIGN
+        wget -q https://dl.google.com/android/repository/sdk-tools-linux-4333796.zip
+        unzip -q sdk-tools-linux-4333796.zip
+        rm sdk-tools-linux-4333796.zip
         
         # Настраиваем переменные окружения
         echo "ANDROID_HOME_SIGN=$ANDROID_HOME_SIGN" >> $GITHUB_ENV
-        echo "PATH=$ANDROID_HOME_SIGN/cmdline-tools/latest/bin:$PATH" >> $GITHUB_ENV
+        echo "PATH=$ANDROID_HOME_SIGN/tools/bin:$PATH" >> $GITHUB_ENV
         
         # Принимаем лицензии (без использования yes)
         echo "Принимаем лицензии Android SDK..."
@@ -376,7 +394,7 @@ jobs:
         
         # Устанавливаем Build-Tools 34.0.0
         echo "Устанавливаем Build-Tools 34.0.0..."
-        $ANDROID_HOME_SIGN/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_HOME_SIGN "build-tools;34.0.0"
+        $ANDROID_HOME_SIGN/tools/bin/sdkmanager "build-tools;34.0.0"
         
         echo "Проверяем установку..."
         ls -la $ANDROID_HOME_SIGN/build-tools/34.0.0/
