@@ -1,14 +1,12 @@
-name: Build and Sign BrutalAI Android APK (arm64-v8a only)
+name: Build and Sign BrutalAI Android APK (arm64-v8a)
 
 on:
   push:
     branches: [ brutal-ai ]
-  pull_request:
-    branches: [ brutal-ai ]
   workflow_dispatch:
 
 jobs:
-  build-and-sign:
+  build:
     runs-on: ubuntu-22.04
     
     steps:
@@ -58,6 +56,7 @@ jobs:
         unzip -q sdk-tools-linux-4333796.zip
         rm sdk-tools-linux-4333796.zip
         
+        # Даем права на выполнение
         chmod -R +x tools/bin/
         
         echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
@@ -89,54 +88,118 @@ jobs:
         echo "Создаем local.properties..."
         echo "sdk.dir=$ANDROID_HOME" > local.properties
         echo "ndk.dir=$ANDROID_NDK_HOME" >> local.properties
+        cat local.properties
         
-    - name: Create or fix build.gradle
+    - name: Fix app/build.gradle syntax
       run: |
-        echo "Создаем/исправляем build.gradle..."
-        mkdir -p app
-        
-        # Создаем простой build.gradle без signingConfigs
-        cat > app/build.gradle << 'GRADLE'
-apply plugin: 'com.android.application'
-
-android {
-    compileSdkVersion 28
-    buildToolsVersion "28.0.3"
-
-    defaultConfig {
-        applicationId "org.openxcom"
-        minSdkVersion 16
-        targetSdkVersion 28
-        versionCode 1
-        versionName "1.0"
-
-        ndk {
-            abiFilters "arm64-v8a"
+        echo "Исправляем синтаксис build.gradle..."
+        if [ -f "app/build.gradle" ]; then
+          echo "Создаем резервную копию build.gradle..."
+          cp app/build.gradle app/build.gradle.backup
+          
+          echo "Проверяем текущий build.gradle..."
+          echo "=== Первые 30 строк build.gradle ==="
+          head -30 app/build.gradle
+          echo "==================================="
+          
+          # Исправляем возможные синтаксические ошибки
+          echo "Исправляем синтаксис..."
+          
+          # Создаем минимальный корректный build.gradle если текущий сломан
+          if ! grep -q "android {" app/build.gradle; then
+            echo "Создаем новый build.gradle с правильным синтаксисом..."
+            echo "apply plugin: 'com.android.application'" > app/build.gradle
+            echo "" >> app/build.gradle
+            echo "android {" >> app/build.gradle
+            echo "    compileSdkVersion 28" >> app/build.gradle
+            echo "    buildToolsVersion \"28.0.3\"" >> app/build.gradle
+            echo "" >> app/build.gradle
+            echo "    defaultConfig {" >> app/build.gradle
+            echo "        applicationId \"org.openxcom\"" >> app/build.gradle
+            echo "        minSdkVersion 16" >> app/build.gradle
+            echo "        targetSdkVersion 28" >> app/build.gradle
+            echo "        versionCode 1" >> app/build.gradle
+            echo "        versionName \"1.0\"" >> app/build.gradle
+            echo "" >> app/build.gradle
+            echo "        ndk {" >> app/build.gradle
+            echo "            abiFilters \"arm64-v8a\"" >> app/build.gradle
+            echo "        }" >> app/build.gradle
+            echo "    }" >> app/build.gradle
+            echo "" >> app/build.gradle
+            echo "    buildTypes {" >> app/build.gradle
+            echo "        release {" >> app/build.gradle
+            echo "            minifyEnabled false" >> app/build.gradle
+            echo "            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'" >> app/build.gradle
+            echo "        }" >> app/build.gradle
+            echo "    }" >> app/build.gradle
+            echo "" >> app/build.gradle
+            echo "    externalNativeBuild {" >> app/build.gradle
+            echo "        cmake {" >> app/build.gradle
+            echo "            path \"src/main/jni/CMakeLists.txt\"" >> app/build.gradle
+            echo "            version \"3.10.2\"" >> app/build.gradle
+            echo "        }" >> app/build.gradle
+            echo "    }" >> app/build.gradle
+            echo "}" >> app/build.gradle
+            echo "" >> app/build.gradle
+            echo "dependencies {" >> app/build.gradle
+            echo "    implementation fileTree(dir: 'libs', include: ['*.jar'])" >> app/build.gradle
+            echo "}" >> app/build.gradle
+          else
+            echo "Используем существующий build.gradle, добавляем настройки arm64..."
+            # Проверяем и исправляем defaultConfig
+            if ! grep -q "ndk {" app/build.gradle; then
+              # Добавляем ndk блок после defaultConfig
+              sed -i '/defaultConfig {/,/}/ {
+                /}/i\
+        ndk {\
+            abiFilters "arm64-v8a"\
         }
-    }
-
-    buildTypes {
-        release {
-            minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
-        }
-    }
-
-    externalNativeBuild {
-        cmake {
-            path "src/main/jni/CMakeLists.txt"
-            version "3.10.2"
-        }
-    }
-}
-
-dependencies {
-    implementation fileTree(dir: 'libs', include: ['*.jar'])
-}
-GRADLE
-        
-        echo "build.gradle создан:"
-        cat app/build.gradle
+              }' app/build.gradle
+            fi
+          fi
+          
+          echo "=== Исправленный build.gradle (первые 40 строк) ==="
+          head -40 app/build.gradle
+        else
+          echo "app/build.gradle не найден, создаем новый..."
+          mkdir -p app
+          echo "apply plugin: 'com.android.application'" > app/build.gradle
+          echo "" >> app/build.gradle
+          echo "android {" >> app/build.gradle
+          echo "    compileSdkVersion 28" >> app/build.gradle
+          echo "    buildToolsVersion \"28.0.3\"" >> app/build.gradle
+          echo "" >> app/build.gradle
+          echo "    defaultConfig {" >> app/build.gradle
+          echo "        applicationId \"org.openxcom\"" >> app/build.gradle
+          echo "        minSdkVersion 16" >> app/build.gradle
+          echo "        targetSdkVersion 28" >> app/build.gradle
+          echo "        versionCode 1" >> app/build.gradle
+          echo "        versionName \"1.0\"" >> app/build.gradle
+          echo "" >> app/build.gradle
+          echo "        ndk {" >> app/build.gradle
+          echo "            abiFilters \"arm64-v8a\"" >> app/build.gradle
+          echo "        }" >> app/build.gradle
+          echo "    }" >> app/build.gradle
+          echo "" >> app/build.gradle
+          echo "    buildTypes {" >> app/build.gradle
+          echo "        release {" >> app/build.gradle
+          echo "            minifyEnabled false" >> app/build.gradle
+          echo "            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'" >> app/build.gradle
+          echo "        }" >> app/build.gradle
+          echo "    }" >> app/build.gradle
+          echo "" >> app/build.gradle
+          echo "    externalNativeBuild {" >> app/build.gradle
+          echo "        cmake {" >> app/build.gradle
+          echo "            path \"src/main/jni/CMakeLists.txt\"" >> app/build.gradle
+          echo "            version \"3.10.2\"" >> app/build.gradle
+          echo "        }" >> app/build.gradle
+          echo "    }" >> app/build.gradle
+          echo "}" >> app/build.gradle
+          echo "" >> app/build.gradle
+          echo "dependencies {" >> app/build.gradle
+          echo "    implementation fileTree(dir: 'libs', include: ['*.jar'])" >> app/build.gradle
+          echo "}" >> app/build.gradle
+        fi
         
     - name: Create gradle.properties for arm64
       run: |
@@ -158,17 +221,21 @@ GRADLE
         echo "Исправляем проблемы совместимости SDL1 и SDL2..."
         cd app/src/main/jni/OpenXcom
         
+        # 1. Исправляем SDLKey на SDL_Keycode
         echo "Исправляем SDLKey на SDL_Keycode..."
         find . -type f \( -name "*.h" -o -name "*.cpp" -o -name "*.hpp" -o -name "*.inc" \) -exec sed -i 's/SDLKey/SDL_Keycode/g' {} \;
         
+        # 2. Исправляем SDL_BUTTON_WHEELUP и SDL_BUTTON_WHEELDOWN
         echo "Исправляем кнопки колесика мыши..."
         find . -type f \( -name "*.cpp" -o -name "*.h" -o -name "*.c" \) -exec sed -i 's/SDL_BUTTON_WHEELUP/4/g' {} \;
         find . -type f \( -name "*.cpp" -o -name "*.h" -o -name "*.c" \) -exec sed -i 's/SDL_BUTTON_WHEELDOWN/5/g' {} \;
         
+        # 3. Исправляем SDL_WarpMouse
         echo "Исправляем SDL_WarpMouse..."
         find . -type f \( -name "*.cpp" -o -name "*.h" -o -name "*.c" \) -exec sed -i 's/SDL_WarpMouse(/SDL_WarpMouseInWindow(NULL, /g' {} \;
         
         echo "Проверяем исправления..."
+        echo "Найдены SDL_Keycode:"
         grep -r "SDL_Keycode" . --include="*.cpp" --include="*.h" | wc -l
         
     - name: Fix warnings in BrutalAI
@@ -176,16 +243,20 @@ GRADLE
         echo "Исправляем предупреждения компилятора..."
         cd app/src/main/jni/OpenXcom
         
+        # Восстанавливаем оригинальный макрос Log в Logger.h
         echo "Восстанавливаем оригинальный макрос Log..."
         if [ -f "src/Engine/Logger.h" ]; then
+          # Восстанавливаем оригинальный макрос Log
           sed -i 's/#define Log(level) do { if (level <= Logger::reportingLevel()) { Logger().get(level); } } while (0)/#define Log(level) if (level > Logger::reportingLevel()) { } else Logger().get(level)/' src/Engine/Logger.h || true
           echo "Logger.h восстановлен"
         else
           echo "Logger.h не найден"
         fi
         
+        # Закомментируем неиспользуемые строки в AIModule.cpp
         echo "Закомментируем неиспользуемые значения в AIModule.cpp..."
         if [ -f "src/Battlescape/AIModule.cpp" ]; then
+          # Закомментируем строки 5032 и 5033
           sed -i '5032s/cost\[j\]\.Time;/\/\/ cost[j].Time;/' src/Battlescape/AIModule.cpp
           sed -i '5033s/cost\[j\]\.Energy;/\/\/ cost[j].Energy;/' src/Battlescape/AIModule.cpp
           echo "AIModule.cpp исправлен"
@@ -209,42 +280,26 @@ GRADLE
           echo "distributionUrl=https\://services.gradle.org/distributions/gradle-4.10.3-bin.zip" >> gradle/wrapper/gradle-wrapper.properties
         fi
         
-    - name: Create Keystore for signing
-      run: |
-        echo "Создаем keystore для подписи APK..."
-        
-        # Используем heredoc для автоматического ответа 'y' на запрос keytool
-        cat << 'KEYTOOL_CMD' | bash
-        keytool -genkeypair -v \
-          -keystore release.keystore \
-          -keyalg RSA -keysize 2048 \
-          -validity 10000 \
-          -alias appalias \
-          -dname "CN=BrutalAI, OU=Android, O=OpenXcom, L=Unknown, ST=Unknown, C=US" \
-          -storepass android \
-          -keypass android \
-          <<< $'y\n'
-KEYTOOL_CMD
-        
-        echo "Keystore создан:"
-        ls -la release.keystore
-        
     - name: Build with Gradle
       run: |
         echo "Собираем APK с Gradle..."
         
+        # Даем права на выполнение
         chmod +x gradlew
         
+        # Проверяем конфигурацию Gradle
         echo "Проверяем Gradle конфигурацию..."
         ./gradlew --version
         
+        # Очищаем и собираем
         echo "Начинаем сборку APK..."
         ./gradlew clean
         
         echo "Собираем Release APK для arm64-v8a..."
         ./gradlew assembleRelease \
           --no-daemon \
-          --stacktrace
+          --stacktrace \
+          -Pandroid.injected.build.abi=arm64-v8a
         
     - name: Check build results
       run: |
@@ -266,81 +321,83 @@ KEYTOOL_CMD
           exit 1
         fi
         
-    - name: Sign APK with jarsigner
-      run: |
-        echo "Подписываем APK..."
-        
-        # Находим APK файл для подписи
-        APK_FILE=$(find app/build/outputs/apk -name "*release*.apk" ! -name "*signed*" -type f | head -1)
-        
-        if [ -z "$APK_FILE" ]; then
-          echo "ОШИБКА: Не найден APK файл для подписи"
-          find app/build/outputs/apk -name "*.apk" -type f
-          exit 1
-        fi
-        
-        echo "Найден APK для подписи: $APK_FILE"
-        
-        # Подписываем APK
-        echo "Подписываем с помощью jarsigner..."
-        jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
-          -keystore release.keystore \
-          -storepass android \
-          -keypass android \
-          "$APK_FILE" \
-          appalias
-        
-        echo "Проверяем подпись..."
-        if jarsigner -verify -verbose "$APK_FILE"; then
-          echo "✓ APK успешно подписан"
-        else
-          echo "✗ Ошибка подписи APK"
-          exit 1
-        fi
-        
-        # Оптимизируем APK с помощью zipalign
-        echo "Оптимизируем APK с помощью zipalign..."
-        SIGNED_APK="${APK_FILE%.apk}-signed.apk"
-        
-        $ANDROID_HOME/build-tools/28.0.3/zipalign -v -p 4 \
-          "$APK_FILE" \
-          "$SIGNED_APK"
-        
-        echo "Подписанный APK создан: $SIGNED_APK"
-        ls -la "$SIGNED_APK"
-        
-    - name: Verify signed APK
-      run: |
-        echo "Проверяем подписанный APK..."
-        
-        # Находим подписанный APK
-        SIGNED_APK=$(find app/build/outputs/apk -name "*signed*.apk" -type f | head -1)
-        
-        if [ -z "$SIGNED_APK" ]; then
-          echo "ОШИБКА: Не найден подписанный APK"
-          exit 1
-        fi
-        
-        echo "Проверяем: $SIGNED_APK"
-        
-        # Проверяем выравнивание
-        echo "Проверяем выравнивание..."
-        $ANDROID_HOME/build-tools/28.0.3/zipalign -c -v 4 "$SIGNED_APK"
-        
-        # Проверяем подпись
-        echo "Проверяем подпись..."
-        if jarsigner -verify -verbose "$SIGNED_APK" | grep -q "jar verified"; then
-          echo "✅ APK подписан и готов к установке!"
-        else
-          echo "❌ APK не прошел проверку подписи"
-          exit 1
-        fi
-        
-    - name: Upload Signed APK artifact
+    - name: Upload Unsigned APK artifact
       uses: actions/upload-artifact@v4
       with:
-        name: BrutalAI-Android-Signed-APK
-        path: |
-          app/build/outputs/apk/**/*signed*.apk
-          app/build/outputs/apk/release/*.apk
+        name: BrutalAI-Unsigned-APK
+        path: app/build/outputs/apk/**/*.apk
+        retention-days: 1
+
+  sign:
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      
+    steps:
+    - name: Download Unsigned APK
+      uses: actions/download-artifact@v4
+      with:
+        name: BrutalAI-Unsigned-APK
+        
+    - name: Setup Android Build Tools for signing
+      run: |
+        echo "Устанавливаем Android Build-Tools 34.0.0 для подписи..."
+        $ANDROID_HOME/tools/bin/sdkmanager "build-tools;34.0.0"
+        
+    - name: Decode Keystore from Secrets
+      run: |
+        echo "Декодируем keystore из секрета..."
+        echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > release-keystore.jks
+        echo "Keystore файл создан. Проверяем размер:"
+        ls -la release-keystore.jks
+        
+    - name: Sign APK using apksigner
+      run: |
+        echo "Находим APK для подписи..."
+        APK_FILE=$(find . -name "*.apk" -type f | head -1)
+        echo "Найден файл: $APK_FILE"
+        
+        # Создаем имя для подписанного APK
+        SIGNED_APK_NAME="BrutalAI-signed-$(date +%Y%m%d-%H%M%S).apk"
+        echo "Имя подписанного файла: $SIGNED_APK_NAME"
+        
+        echo "Подписываем APK..."
+        $ANDROID_HOME/build-tools/34.0.0/apksigner sign \
+          --ks release-keystore.jks \
+          --ks-key-alias "${{ secrets.KEY_ALIAS }}" \
+          --ks-pass pass:"${{ secrets.KEYSTORE_PASSWORD }}" \
+          --key-pass pass:"${{ secrets.KEY_PASSWORD }}" \
+          --out "$SIGNED_APK_NAME" \
+          "$APK_FILE"
+        
+        echo "Проверяем подпись..."
+        $ANDROID_HOME/build-tools/34.0.0/apksigner verify --verbose "$SIGNED_APK_NAME"
+        
+        echo "Размеры файлов:"
+        echo "Исходный: $(du -h "$APK_FILE" | cut -f1)"
+        echo "Подписанный: $(du -h "$SIGNED_APK_NAME" | cut -f1)"
+        
+    - name: Create GitHub Release
+      if: github.event_name == 'push' && github.ref == 'refs/heads/brutal-ai'
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          *.apk
+        name: BrutalAI Release ${{ github.sha }}
+        tag_name: build-${{ github.run_id }}
+        body: |
+          Подписанная релизная версия BrutalAI для Android (arm64-v8a)
+          - Собрано: ${{ github.event.head_commit.timestamp }}
+          - Коммит: ${{ github.sha }}
+          - Подписано с использованием keystore
+        draft: false
+        prerelease: false
+        
+    - name: Upload Signed APK Artifact
+      if: github.event_name != 'push' || github.ref != 'refs/heads/brutal-ai'
+      uses: actions/upload-artifact@v4
+      with:
+        name: BrutalAI-Signed-APK
+        path: "*.apk"
         retention-days: 7
