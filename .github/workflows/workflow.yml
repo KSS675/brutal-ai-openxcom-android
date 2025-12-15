@@ -72,7 +72,7 @@ jobs:
     - name: Install Android platforms and build-tools
       run: |
         echo "Устанавливаем Android platform 28 и build-tools 28.0.3..."
-        $ANDROID_HOME/tools/bin/sdkmanager "platforms;android-28" "platform-tools" "build-tools;28.0.3" "cmake;3.10.2.4988404"
+        $ANDROID_HOME/tools/bin/sdkmanager "platforms;android-28" "platform-tools" "build-tools;28.0.3"
         
     - name: Download Android NDK 18b
       run: |
@@ -85,220 +85,90 @@ jobs:
         echo "NDK_HOME=$HOME/android-ndk-r18b" >> $GITHUB_ENV
         echo "PATH=$ANDROID_NDK_HOME:$PATH" >> $GITHUB_ENV
         
-    - name: Install CMake 3.10.2
+    - name: Create debug keystore
       run: |
-        echo "Устанавливаем CMake 3.10.2..."
-        # Удаляем системный CMake если он есть
-        which cmake && sudo apt-get remove -y cmake || true
-        
-        # Устанавливаем CMake 3.10.2 из Android SDK
-        echo "CMake установлен через Android SDK"
+        echo "Создаем debug.keystore для подписи релизного APK..."
+        keytool -genkeypair -v -keystore debug.keystore \
+          -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 \
+          -dname "CN=Android Debug,O=Android,C=US" \
+          -storepass android -keypass android
+        echo "Копируем debug.keystore в папку app/"
+        cp debug.keystore app/debug.keystore || mkdir -p app && cp debug.keystore app/debug.keystore
         
     - name: Create local.properties
       run: |
         echo "Создаем local.properties..."
         echo "sdk.dir=$ANDROID_HOME" > local.properties
         echo "ndk.dir=$ANDROID_NDK_HOME" >> local.properties
-        echo "cmake.dir=$ANDROID_HOME/cmake/3.10.2.4988404" >> local.properties
         cat local.properties
-        
-    - name: Setup signing keystore
-      run: |
-        echo "Настраиваем подпись приложения..."
-        # Создаем директорию для keystore
-        mkdir -p signing
-        
-        # Декодируем keystore из base64
-        echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > signing/brutalai.jks
-        
-        # Проверяем, что keystore создан
-        if [ -f "signing/brutalai.jks" ]; then
-          echo "Keystore успешно создан"
-          ls -la signing/
-        else
-          echo "ОШИБКА: Не удалось создать keystore"
-          exit 1
-        fi
-        
-        # Создаем файл с паролями для gradle
-        echo "Создаем signing.properties..."
-        echo "storeFile=signing/brutalai.jks" > signing.properties
-        echo "storePassword=${{ secrets.KEYSTORE_PASSWORD }}" >> signing.properties
-        echo "keyAlias=${{ secrets.KEY_ALIAS }}" >> signing.properties
-        echo "keyPassword=${{ secrets.KEY_PASSWORD }}" >> signing.properties
         
     - name: Fix testOnly in gradle.properties
       run: |
+        echo "Создаем корневой gradle.properties для отключения testOnly..."
         echo "android.injected.testOnly=false" > gradle.properties
         echo "android.testOnly=false" >> gradle.properties
         
-    - name: Fix app/build.gradle syntax and add signing
+    - name: Create proper app/build.gradle
       run: |
-        echo "Исправляем синтаксис build.gradle и добавляем подпись..."
-        if [ -f "app/build.gradle" ]; then
-          echo "Создаем резервную копию build.gradle..."
-          cp app/build.gradle app/build.gradle.backup
-          
-          echo "Проверяем текущий build.gradle..."
-          echo "=== Первые 30 строк build.gradle ==="
-          head -30 app/build.gradle
-          echo "==================================="
-          
-          # Создаем новый build.gradle с подписью с использованием echo
-          echo "Создаем новый build.gradle с настройками подписи..."
-          
-          # Удаляем старый файл и создаем новый
-          rm -f app/build.gradle
-          
-          echo "apply plugin: 'com.android.application'" > app/build.gradle
-          echo "" >> app/build.gradle
-          echo "android {" >> app/build.gradle
-          echo "    compileSdkVersion 28" >> app/build.gradle
-          echo "    buildToolsVersion \"28.0.3\"" >> app/build.gradle
-          echo "" >> app/build.gradle
-          echo "    // Настройки подписи" >> app/build.gradle
-          echo "    signingConfigs {" >> app/build.gradle
-          echo "        release {" >> app/build.gradle
-          echo "            def signingProps = new Properties()" >> app/build.gradle
-          echo "            def signingFile = file('../signing.properties')" >> app/build.gradle
-          echo "            if (signingFile.exists()) {" >> app/build.gradle
-          echo "                signingProps.load(new FileInputStream(signingFile))" >> app/build.gradle
-          echo "                storeFile file(signingProps['storeFile'])" >> app/build.gradle
-          echo "                storePassword signingProps['storePassword']" >> app/build.gradle
-          echo "                keyAlias signingProps['keyAlias']" >> app/build.gradle
-          echo "                keyPassword signingProps['keyPassword']" >> app/build.gradle
-          echo "            } else {" >> app/build.gradle
-          echo "                println \"WARNING: signing.properties not found, using debug signing\"" >> app/build.gradle
-          echo "                storeFile file('debug.keystore')" >> app/build.gradle
-          echo "                storePassword 'android'" >> app/build.gradle
-          echo "                keyAlias 'androiddebugkey'" >> app/build.gradle
-          echo "                keyPassword 'android'" >> app/build.gradle
-          echo "            }" >> app/build.gradle
-          echo "        }" >> app/build.gradle
-          echo "    }" >> app/build.gradle
-          echo "" >> app/build.gradle
-          echo "    defaultConfig {" >> app/build.gradle
-          echo "        applicationId \"org.openxcom\"" >> app/build.gradle
-          echo "        minSdkVersion 16" >> app/build.gradle
-          echo "        targetSdkVersion 28" >> app/build.gradle
-          echo "        versionCode 1" >> app/build.gradle
-          echo "        versionName \"1.0\"" >> app/build.gradle
-          echo "" >> app/build.gradle
-          echo "        ndk {" >> app/build.gradle
-          echo "            abiFilters \"arm64-v8a\"" >> app/build.gradle
-          echo "        }" >> app/build.gradle
-          echo "    }" >> app/build.gradle
-          echo "" >> app/build.gradle
-          echo "    buildTypes {" >> app/build.gradle
-          echo "        release {" >> app/build.gradle
-          echo "            minifyEnabled false" >> app/build.gradle
-          echo "            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'" >> app/build.gradle
-          echo "            signingConfig signingConfigs.release" >> app/build.gradle
-          echo "        }" >> app/build.gradle
-          echo "        debug {" >> app/build.gradle
-          echo "            signingConfig signingConfigs.release" >> app/build.gradle
-          echo "        }" >> app/build.gradle
-          echo "    }" >> app/build.gradle
-          echo "" >> app/build.gradle
-          echo "    externalNativeBuild {" >> app/build.gradle
-          echo "        cmake {" >> app/build.gradle
-          echo "            path \"src/main/jni/CMakeLists.txt\"" >> app/build.gradle
-          echo "        }" >> app/build.gradle
-          echo "    }" >> app/build.gradle
-          echo "" >> app/build.gradle
-          echo "    // Отключаем сжатие native библиотек для совместимости" >> app/build.gradle
-          echo "    bundle {" >> app/build.gradle
-          echo "        abi {" >> app/build.gradle
-          echo "            enableSplit = false" >> app/build.gradle
-          echo "        }" >> app/build.gradle
-          echo "    }" >> app/build.gradle
-          echo "}" >> app/build.gradle
-          echo "" >> app/build.gradle
-          echo "dependencies {" >> app/build.gradle
-          echo "    implementation fileTree(dir: 'libs', include: ['*.jar'])" >> app/build.gradle
-          echo "}" >> app/build.gradle
-          
-          echo "=== Исправленный build.gradle ==="
-          cat app/build.gradle
-        else
-          echo "app/build.gradle не найден, создаем новый с подписью..."
-          mkdir -p app
-          
-          echo "apply plugin: 'com.android.application'" > app/build.gradle
-          echo "" >> app/build.gradle
-          echo "android {" >> app/build.gradle
-          echo "    compileSdkVersion 28" >> app/build.gradle
-          echo "    buildToolsVersion \"28.0.3\"" >> app/build.gradle
-          echo "" >> app/build.gradle
-          echo "    // Настройки подписи" >> app/build.gradle
-          echo "    signingConfigs {" >> app/build.gradle
-          echo "        release {" >> app/build.gradle
-          echo "            def signingProps = new Properties()" >> app/build.gradle
-          echo "            def signingFile = file('../signing.properties')" >> app/build.gradle
-          echo "            if (signingFile.exists()) {" >> app/build.gradle
-          echo "                signingProps.load(new FileInputStream(signingFile))" >> app/build.gradle
-          echo "                storeFile file(signingProps['storeFile'])" >> app/build.gradle
-          echo "                storePassword signingProps['storePassword']" >> app/build.gradle
-          echo "                keyAlias signingProps['keyAlias']" >> app/build.gradle
-          echo "                keyPassword signingProps['keyPassword']" >> app/build.gradle
-          echo "            } else {" >> app/build.gradle
-          echo "                println \"WARNING: signing.properties not found, using debug signing\"" >> app/build.gradle
-          echo "                storeFile file('debug.keystore')" >> app/build.gradle
-          echo "                storePassword 'android'" >> app/build.gradle
-          echo "                keyAlias 'androiddebugkey'" >> app/build.gradle
-          echo "                keyPassword 'android'" >> app/build.gradle
-          echo "            }" >> app/build.gradle
-          echo "        }" >> app/build.gradle
-          echo "    }" >> app/build.gradle
-          echo "" >> app/build.gradle
-          echo "    defaultConfig {" >> app/build.gradle
-          echo "        applicationId \"org.openxcom\"" >> app/build.gradle
-          echo "        minSdkVersion 16" >> app/build.gradle
-          echo "        targetSdkVersion 28" >> app/build.gradle
-          echo "        versionCode 1" >> app/build.gradle
-          echo "        versionName \"1.0\"" >> app/build.gradle
-          echo "" >> app/build.gradle
-          echo "        ndk {" >> app/build.gradle
-          echo "            abiFilters \"arm64-v8a\"" >> app/build.gradle
-          echo "        }" >> app/build.gradle
-          echo "    }" >> app/build.gradle
-          echo "" >> app/build.gradle
-          echo "    buildTypes {" >> app/build.gradle
-          echo "        release {" >> app/build.gradle
-          echo "            minifyEnabled false" >> app/build.gradle
-          echo "            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'" >> app/build.gradle
-          echo "            signingConfig signingConfigs.release" >> app/build.gradle
-          echo "        }" >> app/build.gradle
-          echo "        debug {" >> app/build.gradle
-          echo "            signingConfig signingConfigs.release" >> app/build.gradle
-          echo "        }" >> app/build.gradle
-          echo "    }" >> app/build.gradle
-          echo "" >> app/build.gradle
-          echo "    externalNativeBuild {" >> app/build.gradle
-          echo "        cmake {" >> app/build.gradle
-          echo "            path \"src/main/jni/CMakeLists.txt\"" >> app/build.gradle
-          echo "        }" >> app/build.gradle
-          echo "    }" >> app/build.gradle
-          echo "" >> app/build.gradle
-          echo "    // Отключаем сжатие native библиотек для совместимости" >> app/build.gradle
-          echo "    bundle {" >> app/build.gradle
-          echo "        abi {" >> app/build.gradle
-          echo "            enableSplit = false" >> app/build.gradle
-          echo "        }" >> app/build.gradle
-          echo "    }" >> app/build.gradle
-          echo "}" >> app/build.gradle
-          echo "" >> app/build.gradle
-          echo "dependencies {" >> app/build.gradle
-          echo "    implementation fileTree(dir: 'libs', include: ['*.jar'])" >> app/build.gradle
-          echo "}" >> app/build.gradle
-        fi
+        echo "Создаем правильный build.gradle с корректным синтаксисом..."
+        mkdir -p app
+        
+        # Создаем build.gradle с правильным синтаксисом
+        echo "apply plugin: 'com.android.application'" > app/build.gradle
+        echo "" >> app/build.gradle
+        echo "android {" >> app/build.gradle
+        echo "    compileSdkVersion 28" >> app/build.gradle
+        echo "    buildToolsVersion \"28.0.3\"" >> app/build.gradle
+        echo "" >> app/build.gradle
+        echo "    defaultConfig {" >> app/build.gradle
+        echo "        applicationId \"org.openxcom\"" >> app/build.gradle
+        echo "        minSdkVersion 16" >> app/build.gradle
+        echo "        targetSdkVersion 28" >> app/build.gradle
+        echo "        versionCode 1" >> app/build.gradle
+        echo "        versionName \"1.0\"" >> app/build.gradle
+        echo "" >> app/build.gradle
+        echo "        ndk {" >> app/build.gradle
+        echo "            abiFilters \"arm64-v8a\"" >> app/build.gradle
+        echo "        }" >> app/build.gradle
+        echo "    }" >> app/build.gradle
+        echo "" >> app/build.gradle
+        echo "    signingConfigs {" >> app/build.gradle
+        echo "        release {" >> app/build.gradle
+        echo "            storeFile file(\"debug.keystore\")" >> app/build.gradle
+        echo "            storePassword \"android\"" >> app/build.gradle
+        echo "            keyAlias \"androiddebugkey\"" >> app/build.gradle
+        echo "            keyPassword \"android\"" >> app/build.gradle
+        echo "        }" >> app/build.gradle
+        echo "    }" >> app/build.gradle
+        echo "" >> app/build.gradle
+        echo "    buildTypes {" >> app/build.gradle
+        echo "        release {" >> app/build.gradle
+        echo "            minifyEnabled false" >> app/build.gradle
+        echo "            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'" >> app/build.gradle
+        echo "            signingConfig signingConfigs.release" >> app/build.gradle
+        echo "        }" >> app/build.gradle
+        echo "    }" >> app/build.gradle
+        echo "" >> app/build.gradle
+        echo "    externalNativeBuild {" >> app/build.gradle
+        echo "        cmake {" >> app/build.gradle
+        echo "            path \"src/main/jni/CMakeLists.txt\"" >> app/build.gradle
+        echo "            version \"3.10.2\"" >> app/build.gradle
+        echo "        }" >> app/build.gradle
+        echo "    }" >> app/build.gradle
+        echo "}" >> app/build.gradle
+        echo "" >> app/build.gradle
+        echo "dependencies {" >> app/build.gradle
+        echo "    implementation fileTree(dir: 'libs', include: ['*.jar'])" >> app/build.gradle
+        echo "}" >> app/build.gradle
+        
+        echo "=== Созданный build.gradle ==="
+        cat app/build.gradle
         
     - name: Create gradle.properties for arm64
       run: |
         echo "Создаем gradle.properties для arm64-v8a..."
         echo "android.useDeprecatedNdk=true" > app/gradle.properties
-        # Убираем проблемную строку с enableUncompressedNativeLibs
-        echo "# android.bundle.enableUncompressedNativeLibs=false" >> app/gradle.properties
+        echo "android.bundle.enableUncompressedNativeLibs=false" >> app/gradle.properties
         
     - name: Create Application.mk for arm64
       run: |
@@ -308,21 +178,6 @@ jobs:
         echo "APP_PLATFORM := android-21" >> app/src/main/jni/Application.mk
         echo "APP_STL := c++_static" >> app/src/main/jni/Application.mk
         echo "APP_CPPFLAGS := -std=c++11 -frtti -fexceptions -Wno-error=unused-value -Wno-error=dangling-else" >> app/src/main/jni/Application.mk
-        
-    - name: Create CMakeLists.txt if not exists
-      run: |
-        echo "Проверяем наличие CMakeLists.txt..."
-        if [ ! -f "app/src/main/jni/CMakeLists.txt" ]; then
-          echo "Создаем базовый CMakeLists.txt..."
-          mkdir -p app/src/main/jni
-          echo "cmake_minimum_required(VERSION 3.10.2)" > app/src/main/jni/CMakeLists.txt
-          echo "project(openxcom)" >> app/src/main/jni/CMakeLists.txt
-          echo "" >> app/src/main/jni/CMakeLists.txt
-          echo "add_subdirectory(OpenXcom)" >> app/src/main/jni/CMakeLists.txt
-        else
-          echo "CMakeLists.txt уже существует"
-          cat app/src/main/jni/CMakeLists.txt
-        fi
         
     - name: Fix SDL1 to SDL2 compatibility issues
       run: |
@@ -354,6 +209,7 @@ jobs:
         # Восстанавливаем оригинальный макрос Log в Logger.h
         echo "Восстанавливаем оригинальный макрос Log..."
         if [ -f "src/Engine/Logger.h" ]; then
+          # Восстанавливаем оригинальный макрос Log
           sed -i 's/#define Log(level) do { if (level <= Logger::reportingLevel()) { Logger().get(level); } } while (0)/#define Log(level) if (level > Logger::reportingLevel()) { } else Logger().get(level)/' src/Engine/Logger.h || true
           echo "Logger.h восстановлен"
         else
@@ -363,6 +219,7 @@ jobs:
         # Закомментируем неиспользуемые строки в AIModule.cpp
         echo "Закомментируем неиспользуемые значения в AIModule.cpp..."
         if [ -f "src/Battlescape/AIModule.cpp" ]; then
+          # Закомментируем строки 5032 и 5033
           sed -i '5032s/cost\[j\]\.Time;/\/\/ cost[j].Time;/' src/Battlescape/AIModule.cpp
           sed -i '5033s/cost\[j\]\.Energy;/\/\/ cost[j].Energy;/' src/Battlescape/AIModule.cpp
           echo "AIModule.cpp исправлен"
@@ -386,17 +243,9 @@ jobs:
           echo "distributionUrl=https\://services.gradle.org/distributions/gradle-4.10.3-bin.zip" >> gradle/wrapper/gradle-wrapper.properties
         fi
         
-    - name: Verify CMake installation
-      run: |
-        echo "Проверяем установку CMake..."
-        echo "CMake из Android SDK:"
-        ls -la $ANDROID_HOME/cmake/ || echo "CMake не найден в Android SDK"
-        echo "Содержимое local.properties:"
-        cat local.properties
-        
     - name: Build with Gradle
       run: |
-        echo "Собираем подписанный релизный APK с Gradle..."
+        echo "Собираем APK с Gradle..."
         
         # Даем права на выполнение
         chmod +x gradlew
@@ -409,12 +258,44 @@ jobs:
         echo "Начинаем сборку APK..."
         ./gradlew clean
         
-        echo "Собираем Release APK для arm64-v8a с подписью..."
+        echo "Собираем Release APK для arm64-v8a..."
         ./gradlew assembleRelease \
           --no-daemon \
           --stacktrace \
-          -Pandroid.injected.build.abi=arm64-v8a
+          -Pandroid.injected.build.abi=arm64-v8a \
+          -Pandroid.injected.testOnly=false
         
     - name: Check build results
       run: |
-        echo "Проверяем резу
+        echo "Проверяем результаты сборки..."
+        if [ -d "app/build/outputs/apk" ]; then
+          echo "Найденные APK файлы:"
+          find app/build/outputs/apk -name "*.apk" -type f | xargs ls -la
+          
+          # Проверяем наличие release APK
+          RELEASE_APK=$(find app/build/outputs/apk -name "*release*.apk" -type f | head -1)
+          if [ -n "$RELEASE_APK" ]; then
+            echo "Найден релизный APK: $RELEASE_APK"
+            echo "Размер файла:"
+            ls -la "$RELEASE_APK"
+          else
+            echo "ОШИБКА: Релизный APK не найден!"
+            echo "Найденные APK:"
+            find app/build/outputs/apk -name "*.apk" -type f
+            echo "Содержимое app/build/outputs/apk:"
+            ls -la app/build/outputs/apk/
+            exit 1
+          fi
+        else
+          echo "ОШИБКА: Папка app/build/outputs/apk не существует!"
+          echo "Содержимое app/build:"
+          ls -la app/build/
+          exit 1
+        fi
+        
+    - name: Upload APK artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: BrutalAI-Android-Release-APK-arm64
+        path: app/build/outputs/apk/**/*release*.apk
+        retention-days: 7
