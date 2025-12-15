@@ -89,101 +89,54 @@ jobs:
         echo "Создаем local.properties..."
         echo "sdk.dir=$ANDROID_HOME" > local.properties
         echo "ndk.dir=$ANDROID_NDK_HOME" >> local.properties
-        cat local.properties
         
-    - name: Fix app/build.gradle syntax
+    - name: Create or fix build.gradle
       run: |
-        echo "Исправляем синтаксис build.gradle..."
-        if [ -f "app/build.gradle" ]; then
-          echo "Создаем резервную копию build.gradle..."
-          cp app/build.gradle app/build.gradle.backup
-          
-          echo "Проверяем текущий build.gradle..."
-          echo "=== Первые 30 строк build.gradle ==="
-          head -30 app/build.gradle
-          echo "==================================="
-          
-          echo "Исправляем синтаксис..."
-          
-          # Добавляем блок signingConfigs если его нет
-          if ! grep -q "signingConfigs" app/build.gradle; then
-            echo "Добавляем signingConfigs в build.gradle..."
-            
-            # Создаем временный файл с signingConfigs
-            cat > /tmp/signing_configs.txt << 'CONFIG'
-    signingConfigs {
-        release {
-            storeFile file(System.getProperty("user.home") + "/release.keystore")
-            storePassword ""
-            keyAlias ""
-            keyPassword ""
+        echo "Создаем/исправляем build.gradle..."
+        mkdir -p app
+        
+        # Создаем простой build.gradle без signingConfigs
+        cat > app/build.gradle << 'GRADLE'
+apply plugin: 'com.android.application'
+
+android {
+    compileSdkVersion 28
+    buildToolsVersion "28.0.3"
+
+    defaultConfig {
+        applicationId "org.openxcom"
+        minSdkVersion 16
+        targetSdkVersion 28
+        versionCode 1
+        versionName "1.0"
+
+        ndk {
+            abiFilters "arm64-v8a"
         }
     }
-CONFIG
-            
-            # Вставляем после android {
-            sed -i '/android {/r /tmp/signing_configs.txt' app/build.gradle
-            
-            # Обновляем release buildType чтобы использовать signingConfig
-            if grep -q "buildTypes {" app/build.gradle; then
-              sed -i '/release {/,/minifyEnabled/ s/minifyEnabled false/minifyEnabled false\n            signingConfig signingConfigs.release/' app/build.gradle
-            fi
-          fi
-          
-          echo "=== Исправленный build.gradle (первые 40 строк) ==="
-          head -40 app/build.gradle
-        else
-          echo "app/build.gradle не найден, создаем новый..."
-          mkdir -p app
-          
-          # Создаем build.gradle с помощью последовательных echo
-          echo "apply plugin: 'com.android.application'" > app/build.gradle
-          echo "" >> app/build.gradle
-          echo "android {" >> app/build.gradle
-          echo "    compileSdkVersion 28" >> app/build.gradle
-          echo "    buildToolsVersion \"28.0.3\"" >> app/build.gradle
-          echo "" >> app/build.gradle
-          echo "    signingConfigs {" >> app/build.gradle
-          echo "        release {" >> app/build.gradle
-          echo "            storeFile file(System.getProperty(\"user.home\") + \"/release.keystore\")" >> app/build.gradle
-          echo "            storePassword \"\"" >> app/build.gradle
-          echo "            keyAlias \"\"" >> app/build.gradle
-          echo "            keyPassword \"\"" >> app/build.gradle
-          echo "        }" >> app/build.gradle
-          echo "    }" >> app/build.gradle
-          echo "" >> app/build.gradle
-          echo "    defaultConfig {" >> app/build.gradle
-          echo "        applicationId \"org.openxcom\"" >> app/build.gradle
-          echo "        minSdkVersion 16" >> app/build.gradle
-          echo "        targetSdkVersion 28" >> app/build.gradle
-          echo "        versionCode 1" >> app/build.gradle
-          echo "        versionName \"1.0\"" >> app/build.gradle
-          echo "" >> app/build.gradle
-          echo "        ndk {" >> app/build.gradle
-          echo "            abiFilters \"arm64-v8a\"" >> app/build.gradle
-          echo "        }" >> app/build.gradle
-          echo "    }" >> app/build.gradle
-          echo "" >> app/build.gradle
-          echo "    buildTypes {" >> app/build.gradle
-          echo "        release {" >> app/build.gradle
-          echo "            minifyEnabled false" >> app/build.gradle
-          echo "            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'" >> app/build.gradle
-          echo "            signingConfig signingConfigs.release" >> app/build.gradle
-          echo "        }" >> app/build.gradle
-          echo "    }" >> app/build.gradle
-          echo "" >> app/build.gradle
-          echo "    externalNativeBuild {" >> app/build.gradle
-          echo "        cmake {" >> app/build.gradle
-          echo "            path \"src/main/jni/CMakeLists.txt\"" >> app/build.gradle
-          echo "            version \"3.10.2\"" >> app/build.gradle
-          echo "        }" >> app/build.gradle
-          echo "    }" >> app/build.gradle
-          echo "}" >> app/build.gradle
-          echo "" >> app/build.gradle
-          echo "dependencies {" >> app/build.gradle
-          echo "    implementation fileTree(dir: 'libs', include: ['*.jar'])" >> app/build.gradle
-          echo "}" >> app/build.gradle
-        fi
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path "src/main/jni/CMakeLists.txt"
+            version "3.10.2"
+        }
+    }
+}
+
+dependencies {
+    implementation fileTree(dir: 'libs', include: ['*.jar'])
+}
+GRADLE
+        
+        echo "build.gradle создан:"
+        cat app/build.gradle
         
     - name: Create gradle.properties for arm64
       run: |
@@ -216,7 +169,6 @@ CONFIG
         find . -type f \( -name "*.cpp" -o -name "*.h" -o -name "*.c" \) -exec sed -i 's/SDL_WarpMouse(/SDL_WarpMouseInWindow(NULL, /g' {} \;
         
         echo "Проверяем исправления..."
-        echo "Найдены SDL_Keycode:"
         grep -r "SDL_Keycode" . --include="*.cpp" --include="*.h" | wc -l
         
     - name: Fix warnings in BrutalAI
@@ -250,8 +202,6 @@ CONFIG
         else
           echo "gradle-wrapper.properties не найден, создаем..."
           mkdir -p gradle/wrapper
-          
-          # Используем последовательные echo
           echo "distributionBase=GRADLE_USER_HOME" > gradle/wrapper/gradle-wrapper.properties
           echo "distributionPath=wrapper/dists" >> gradle/wrapper/gradle-wrapper.properties
           echo "zipStoreBase=GRADLE_USER_HOME" >> gradle/wrapper/gradle-wrapper.properties
@@ -259,46 +209,27 @@ CONFIG
           echo "distributionUrl=https\://services.gradle.org/distributions/gradle-4.10.3-bin.zip" >> gradle/wrapper/gradle-wrapper.properties
         fi
         
-    - name: Create Keystore for signing (if not using existing)
-      if: ${{ !secrets.SIGNING_KEY_BASE64 }}
+    - name: Create Keystore for signing
       run: |
-        echo "Создаем новый keystore для подписи..."
+        echo "Создаем keystore для подписи APK..."
         
-        # Используем heredoc для передачи параметров keytool
-        cat << KEYTOOL_INPUT | keytool -genkeypair -v \
+        # Используем heredoc для автоматического ответа 'y' на запрос keytool
+        cat << 'KEYTOOL_CMD' | bash
+        keytool -genkeypair -v \
           -keystore release.keystore \
           -keyalg RSA -keysize 2048 \
           -validity 10000 \
           -alias appalias \
           -dname "CN=BrutalAI, OU=Android, O=OpenXcom, L=Unknown, ST=Unknown, C=US" \
           -storepass android \
-          -keypass android
-        y
-KEYTOOL_INPUT
+          -keypass android \
+          <<< $'y\n'
+KEYTOOL_CMD
         
         echo "Keystore создан:"
         ls -la release.keystore
         
-        echo "Копируем keystore в домашнюю директорию..."
-        cp release.keystore ~/release.keystore
-        
-    - name: Decode Keystore from secrets (if using existing)
-      if: ${{ secrets.SIGNING_KEY_BASE64 }}
-      run: |
-        echo "Декодируем keystore из секретов..."
-        echo "${{ secrets.SIGNING_KEY_BASE64 }}" | base64 --decode > release.keystore
-        
-        echo "Копируем keystore в домашнюю директорию..."
-        cp release.keystore ~/release.keystore
-        
-        echo "Проверяем созданный keystore..."
-        ls -la release.keystore
-        
     - name: Build with Gradle
-      env:
-        RELEASE_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD || 'android' }}
-        RELEASE_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || 'android' }}
-        RELEASE_KEY_ALIAS: ${{ secrets.KEY_ALIAS || 'appalias' }}
       run: |
         echo "Собираем APK с Gradle..."
         
@@ -307,28 +238,13 @@ KEYTOOL_INPUT
         echo "Проверяем Gradle конфигурацию..."
         ./gradlew --version
         
-        echo "Обновляем пароли в build.gradle..."
-        
-        # Обновляем storePassword
-        sed -i "s/storePassword = \\\"\\\"/storePassword = \\\"$RELEASE_STORE_PASSWORD\\\"/" app/build.gradle || \
-        sed -i "s/storePassword \\\"\\\"/storePassword \\\"$RELEASE_STORE_PASSWORD\\\"/" app/build.gradle
-        
-        # Обновляем keyAlias
-        sed -i "s/keyAlias = \\\"\\\"/keyAlias = \\\"$RELEASE_KEY_ALIAS\\\"/" app/build.gradle || \
-        sed -i "s/keyAlias \\\"\\\"/keyAlias \\\"$RELEASE_KEY_ALIAS\\\"/" app/build.gradle
-        
-        # Обновляем keyPassword
-        sed -i "s/keyPassword = \\\"\\\"/keyPassword = \\\"$RELEASE_KEY_PASSWORD\\\"/" app/build.gradle || \
-        sed -i "s/keyPassword \\\"\\\"/keyPassword \\\"$RELEASE_KEY_PASSWORD\\\"/" app/build.gradle
-        
         echo "Начинаем сборку APK..."
         ./gradlew clean
         
-        echo "Собираем Release APK для arm64-v8a с подписью..."
+        echo "Собираем Release APK для arm64-v8a..."
         ./gradlew assembleRelease \
           --no-daemon \
-          --stacktrace \
-          -Pandroid.injected.build.abi=arm64-v8a
+          --stacktrace
         
     - name: Check build results
       run: |
@@ -336,16 +252,6 @@ KEYTOOL_INPUT
         if [ -d "app/build/outputs/apk" ]; then
           echo "Найденные APK файлы:"
           find app/build/outputs/apk -name "*.apk" -type f | xargs ls -la
-          
-          echo "Проверяем подпись APK..."
-          for apk in $(find app/build/outputs/apk -name "*release*.apk" -type f); do
-            echo "Проверка $apk:"
-            if jarsigner -verify -verbose "$apk" > /dev/null 2>&1; then
-              echo "✓ APK подписан корректно"
-            else
-              echo "✗ APK не подписан или подпись неверна"
-            fi
-          done
           
           if [ $(find app/build/outputs/apk -name "*.apk" -type f | wc -l) -eq 0 ]; then
             echo "ОШИБКА: APK файлы не собраны!"
@@ -360,44 +266,81 @@ KEYTOOL_INPUT
           exit 1
         fi
         
-    - name: Sign APK with external tool (fallback)
-      if: failure()
+    - name: Sign APK with jarsigner
       run: |
-        echo "Используем альтернативный метод подписи APK..."
+        echo "Подписываем APK..."
         
-        UNSIGNED_APK=$(find app/build/outputs/apk -name "*release*.apk" ! -name "*signed*" -type f | head -1)
+        # Находим APK файл для подписи
+        APK_FILE=$(find app/build/outputs/apk -name "*release*.apk" ! -name "*signed*" -type f | head -1)
         
-        if [ -z "$UNSIGNED_APK" ]; then
-          echo "Не найден unsigned APK для подписи"
+        if [ -z "$APK_FILE" ]; then
+          echo "ОШИБКА: Не найден APK файл для подписи"
+          find app/build/outputs/apk -name "*.apk" -type f
           exit 1
         fi
         
-        echo "Подписываем APK: $UNSIGNED_APK"
+        echo "Найден APK для подписи: $APK_FILE"
         
-        # Используем cat для передачи паролей
-        cat << SIGN_COMMAND | bash
+        # Подписываем APK
+        echo "Подписываем с помощью jarsigner..."
         jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
           -keystore release.keystore \
-          -storepass "${{ secrets.KEY_STORE_PASSWORD || 'android' }}" \
-          -keypass "${{ secrets.KEY_PASSWORD || 'android' }}" \
-          "$UNSIGNED_APK" \
-          "${{ secrets.KEY_ALIAS || 'appalias' }}"
-SIGN_COMMAND
+          -storepass android \
+          -keypass android \
+          "$APK_FILE" \
+          appalias
         
-        SIGNED_APK="${UNSIGNED_APK%.apk}-signed.apk"
+        echo "Проверяем подпись..."
+        if jarsigner -verify -verbose "$APK_FILE"; then
+          echo "✓ APK успешно подписан"
+        else
+          echo "✗ Ошибка подписи APK"
+          exit 1
+        fi
+        
+        # Оптимизируем APK с помощью zipalign
+        echo "Оптимизируем APK с помощью zipalign..."
+        SIGNED_APK="${APK_FILE%.apk}-signed.apk"
         
         $ANDROID_HOME/build-tools/28.0.3/zipalign -v -p 4 \
-          "$UNSIGNED_APK" \
+          "$APK_FILE" \
           "$SIGNED_APK"
         
         echo "Подписанный APK создан: $SIGNED_APK"
         ls -la "$SIGNED_APK"
+        
+    - name: Verify signed APK
+      run: |
+        echo "Проверяем подписанный APK..."
+        
+        # Находим подписанный APK
+        SIGNED_APK=$(find app/build/outputs/apk -name "*signed*.apk" -type f | head -1)
+        
+        if [ -z "$SIGNED_APK" ]; then
+          echo "ОШИБКА: Не найден подписанный APK"
+          exit 1
+        fi
+        
+        echo "Проверяем: $SIGNED_APK"
+        
+        # Проверяем выравнивание
+        echo "Проверяем выравнивание..."
+        $ANDROID_HOME/build-tools/28.0.3/zipalign -c -v 4 "$SIGNED_APK"
+        
+        # Проверяем подпись
+        echo "Проверяем подпись..."
+        if jarsigner -verify -verbose "$SIGNED_APK" | grep -q "jar verified"; then
+          echo "✅ APK подписан и готов к установке!"
+        else
+          echo "❌ APK не прошел проверку подписи"
+          exit 1
+        fi
         
     - name: Upload Signed APK artifact
       uses: actions/upload-artifact@v4
       with:
         name: BrutalAI-Android-Signed-APK
         path: |
-          app/build/outputs/apk/**/*release*.apk
           app/build/outputs/apk/**/*signed*.apk
+          app/build/outputs/apk/release/*.apk
         retention-days: 7
