@@ -69,10 +69,10 @@ jobs:
         echo "Принимаем лицензии Android SDK..."
         yes | $ANDROID_HOME/tools/bin/sdkmanager --licenses || true
         
-    - name: Install Android platforms and build-tools
+    - name: Install Android platforms, build-tools and CMake 3.10.2
       run: |
-        echo "Устанавливаем Android platform 28 и build-tools 28.0.3..."
-        $ANDROID_HOME/tools/bin/sdkmanager "platforms;android-28" "platform-tools" "build-tools;28.0.3"
+        echo "Устанавливаем Android platform 28, build-tools 28.0.3 и CMake 3.10.2..."
+        $ANDROID_HOME/tools/bin/sdkmanager "platforms;android-28" "platform-tools" "build-tools;28.0.3" "cmake;3.10.2.4988404"
         
     - name: Download Android NDK 18b
       run: |
@@ -90,6 +90,7 @@ jobs:
         echo "Создаем local.properties..."
         echo "sdk.dir=$ANDROID_HOME" > local.properties
         echo "ndk.dir=$ANDROID_NDK_HOME" >> local.properties
+        echo "cmake.dir=$ANDROID_HOME/cmake/3.10.2.4988404" >> local.properties
         cat local.properties
         
     - name: Create debug keystore
@@ -172,7 +173,7 @@ jobs:
           echo "    externalNativeBuild {" >> app/build.gradle
           echo "        cmake {" >> app/build.gradle
           echo "            path \"src/main/jni/CMakeLists.txt\"" >> app/build.gradle
-          echo "            version \"3.31.6\"" >> app/build.gradle
+          echo "            version \"3.10.2\"" >> app/build.gradle
           echo "        }" >> app/build.gradle
           echo "    }" >> app/build.gradle
           echo "}" >> app/build.gradle
@@ -233,7 +234,7 @@ jobs:
           echo "    externalNativeBuild {" >> app/build.gradle
           echo "        cmake {" >> app/build.gradle
           echo "            path \"src/main/jni/CMakeLists.txt\"" >> app/build.gradle
-          echo "            version \"3.31.6\"" >> app/build.gradle
+          echo "            version \"3.10.2\"" >> app/build.gradle
           echo "        }" >> app/build.gradle
           echo "    }" >> app/build.gradle
           echo "}" >> app/build.gradle
@@ -241,6 +242,21 @@ jobs:
           echo "dependencies {" >> app/build.gradle
           echo "    implementation fileTree(dir: 'libs', include: ['*.jar'])" >> app/build.gradle
           echo "}" >> app/build.gradle
+        fi
+        
+    - name: Verify CMake installation
+      run: |
+        echo "Проверяем установку CMake..."
+        echo "Ищем CMake в ANDROID_HOME/cmake..."
+        find $ANDROID_HOME/cmake -name "cmake" -type f 2>/dev/null || echo "CMake не найден"
+        echo "Содержимое папки cmake:"
+        ls -la $ANDROID_HOME/cmake/ || echo "Папка cmake не существует"
+        if [ -d "$ANDROID_HOME/cmake/3.10.2.4988404" ]; then
+          echo "CMake 3.10.2.4988404 установлен успешно"
+          echo "Проверяем путь к CMake:"
+          $ANDROID_HOME/cmake/3.10.2.4988404/bin/cmake --version || echo "Не удалось запустить CMake"
+        else
+          echo "Предупреждение: CMake 3.10.2.4988404 не найден"
         fi
         
     - name: Create gradle.properties for arm64
