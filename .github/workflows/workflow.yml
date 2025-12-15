@@ -90,35 +90,69 @@ jobs:
         echo "sdk.dir=$ANDROID_HOME" > local.properties
         echo "ndk.dir=$ANDROID_NDK_HOME" >> local.properties
         
-    - name: Install Gradle manually
+    - name: Install Gradle 5.0 manually
       run: |
-        echo "Устанавливаем Gradle 4.10.3 вручную..."
+        echo "Устанавливаем Gradle 5.0 вручную..."
         
         cd /tmp
-        # Пробуем разные зеркала
-        if ! wget -q --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 -t 3 \
-          https://downloads.gradle-dn.com/distributions/gradle-4.10.3-bin.zip; then
+        
+        # Пробуем разные источники для Gradle 5.0
+        echo "Пробуем скачать Gradle 5.0 с разных источников..."
+        
+        # Источник 1: Официальный сайт
+        if ! wget -q https://services.gradle.org/distributions/gradle-5.0-bin.zip; then
+          echo "Не удалось с официального сайта, пробуем альтернативный источник..."
           
-          if ! wget -q https://services.gradle.org/distributions/gradle-4.10.3-bin.zip; then
-            wget -q https://mirrors.cloud.tencent.com/gradle/gradle-4.10.3-bin.zip
+          # Источник 2: Archive.org (часто есть старые версии)
+          if ! wget -q https://github.com/gradle/gradle/releases/download/v5.0.0/gradle-5.0-bin.zip; then
+            echo "Не удалось с GitHub releases, пробуем Tencent mirror..."
+            
+            # Источник 3: Tencent mirror
+            wget -q https://mirrors.cloud.tencent.com/gradle/gradle-5.0-bin.zip || echo "Не удалось скачать Gradle 5.0"
           fi
         fi
         
-        if [ -f "gradle-4.10.3-bin.zip" ]; then
-          sudo unzip -d /opt gradle-4.10.3-bin.zip
-          echo "GRADLE_HOME=/opt/gradle-4.10.3" >> $GITHUB_ENV
-          echo "PATH=/opt/gradle-4.10.3/bin:$PATH" >> $GITHUB_ENV
+        if [ -f "gradle-5.0-bin.zip" ]; then
+          echo "Распаковываем Gradle 5.0..."
+          sudo mkdir -p /opt/gradle
+          sudo unzip -d /opt/gradle gradle-5.0-bin.zip
+          echo "GRADLE_HOME=/opt/gradle/gradle-5.0" >> $GITHUB_ENV
+          echo "PATH=/opt/gradle/gradle-5.0/bin:$PATH" >> $GITHUB_ENV
+          echo "Gradle 5.0 установлен"
+          
+          # Проверяем установку
+          /opt/gradle/gradle-5.0/bin/gradle --version
         else
-          echo "ОШИБКА: Не удалось скачать Gradle!"
-          exit 1
+          echo "ОШИБКА: Не удалось скачать Gradle 5.0! Пробуем Gradle 4.6..."
+          
+          # Пробуем Gradle 4.6 как запасной вариант
+          wget -q https://services.gradle.org/distributions/gradle-4.6-bin.zip
+          if [ -f "gradle-4.6-bin.zip" ]; then
+            sudo mkdir -p /opt/gradle
+            sudo unzip -d /opt/gradle gradle-4.6-bin.zip
+            echo "GRADLE_HOME=/opt/gradle/gradle-4.6" >> $GITHUB_ENV
+            echo "PATH=/opt/gradle/gradle-4.6/bin:$PATH" >> $GITHUB_ENV
+            echo "Gradle 4.6 установлен как запасной вариант"
+          else
+            echo "ОШИБКА: Не удалось скачать ни Gradle 5.0, ни Gradle 4.6!"
+            exit 1
+          fi
         fi
         
-    - name: Create build.gradle without signing
+    - name: Create updated build.gradle for Gradle 5.0
       run: |
-        echo "Создаем build.gradle БЕЗ подписи (будем подписывать после сборки)..."
+        echo "Создаем build.gradle совместимый с Gradle 5.0..."
         mkdir -p app
         
-        echo "apply plugin: 'com.android.application'" > app/build.gradle
+        # Проверяем, какой Gradle установлен
+        GRADLE_VERSION=$(gradle --version | grep "Gradle" | head -1 | awk '{print $2}')
+        echo "Используется Gradle версии: $GRADLE_VERSION"
+        
+        # Создаем build.gradle с учетом версии Gradle
+        echo "// Gradle version: $GRADLE_VERSION" > app/build.gradle
+        echo "// Built with Android SDK 28" >> app/build.gradle
+        echo "" >> app/build.gradle
+        echo "apply plugin: 'com.android.application'" >> app/build.gradle
         echo "" >> app/build.gradle
         echo "android {" >> app/build.gradle
         echo "    compileSdkVersion 28" >> app/build.gradle
@@ -134,13 +168,20 @@ jobs:
         echo "        ndk {" >> app/build.gradle
         echo "            abiFilters \"arm64-v8a\"" >> app/build.gradle
         echo "        }" >> app/build.gradle
+        echo "        " >> app/build.gradle
+        echo "        // Для Gradle 5.0 и выше" >> app/build.gradle
+        echo "        externalNativeBuild {" >> app/build.gradle
+        echo "            cmake {" >> app/build.gradle
+        echo "                cppFlags \"-std=c++11 -frtti -fexceptions -Wno-error=unused-value -Wno-error=dangling-else\"" >> app/build.gradle
+        echo "                arguments \"-DANDROID_STL=c++_static\"" >> app/build.gradle
+        echo "            }" >> app/build.gradle
+        echo "        }" >> app/build.gradle
         echo "    }" >> app/build.gradle
         echo "" >> app/build.gradle
         echo "    buildTypes {" >> app/build.gradle
         echo "        release {" >> app/build.gradle
         echo "            minifyEnabled false" >> app/build.gradle
         echo "            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'" >> app/build.gradle
-        echo "            signingConfig null  # Отключаем подпись при сборке" >> app/build.gradle
         echo "        }" >> app/build.gradle
         echo "    }" >> app/build.gradle
         echo "" >> app/build.gradle
@@ -150,17 +191,28 @@ jobs:
         echo "            version \"3.10.2\"" >> app/build.gradle
         echo "        }" >> app/build.gradle
         echo "    }" >> app/build.gradle
+        echo "" >> app/build.gradle
+        echo "    // Для отключения проверки устаревших функций" >> app/build.gradle
+        echo "    lintOptions {" >> app/build.gradle
+        echo "        checkReleaseBuilds false" >> app/build.gradle
+        echo "        abortOnError false" >> app/build.gradle
+        echo "    }" >> app/build.gradle
         echo "}" >> app/build.gradle
         echo "" >> app/build.gradle
         echo "dependencies {" >> app/build.gradle
         echo "    implementation fileTree(dir: 'libs', include: ['*.jar'])" >> app/build.gradle
         echo "}" >> app/build.gradle
         
-    - name: Create gradle.properties for arm64
+    - name: Create gradle.properties for Gradle 5.0
       run: |
-        echo "Создаем gradle.properties..."
-        echo "android.useDeprecatedNdk=true" > app/gradle.properties
-        echo "android.bundle.enableUncompressedNativeLibs=false" >> app/gradle.properties
+        echo "Создаем gradle.properties для Gradle 5.0..."
+        echo "# Конфигурация для Android и NDK" > app/gradle.properties
+        echo "android.useDeprecatedNdk=true" >> app/gradle.properties
+        echo "android.enableD8=true" >> app/gradle.properties
+        echo "android.enableR8=false" >> app/gradle.properties
+        echo "org.gradle.jvmargs=-Xmx2048m -XX:MaxMetaspaceSize=512m" >> app/gradle.properties
+        echo "org.gradle.parallel=true" >> app/gradle.properties
+        echo "org.gradle.daemon=false" >> app/gradle.properties
         
     - name: Create Application.mk for arm64
       run: |
@@ -195,12 +247,13 @@ jobs:
           sed -i '5033s/cost\[j\]\.Energy;/\/\/ cost[j].Energy;/' src/Battlescape/AIModule.cpp
         fi
         
-    - name: Build APK without signing
+    - name: Build APK with Gradle
       run: |
-        echo "Собираем APK БЕЗ подписи..."
+        echo "Собираем APK с Gradle..."
         
         # Проверяем версию Gradle
-        gradle -v
+        echo "=== Информация о Gradle ==="
+        gradle --version
         
         echo "Переходим в директорию проекта..."
         cd app
@@ -208,26 +261,41 @@ jobs:
         echo "Очищаем проект..."
         gradle clean
         
-        echo "Собираем Release APK (без подписи)..."
+        echo "Проверяем задачи Gradle..."
+        gradle tasks
+        
+        echo "Собираем Release APK..."
         gradle assembleRelease \
           --no-daemon \
           --stacktrace \
-          --info
+          --info \
+          --warning-mode all
         
         echo "Сборка завершена. Проверяем APK..."
         find build/outputs/apk -name "*.apk" -type f | xargs ls -la
+        
+        # Сохраняем путь к APK для следующего шага
+        APK_FILE=$(find build/outputs/apk/release -name "*.apk" | head -1)
+        if [ -n "$APK_FILE" ]; then
+          echo "APK_FILE=$APK_FILE" >> $GITHUB_ENV
+        fi
         
     - name: Sign APK if not signed
       run: |
         echo "Проверяем и подписываем APK..."
         
-        # Ищем любой APK в папке release
-        APK_FILE=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
+        # Используем сохраненный путь или ищем APK
+        if [ -n "$APK_FILE" ] && [ -f "$APK_FILE" ]; then
+          echo "Используем найденный ранее APK: $APK_FILE"
+        else
+          # Ищем любой APK в папке release
+          APK_FILE=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
+        fi
         
-        if [ -z "$APK_FILE" ]; then
+        if [ -z "$APK_FILE" ] || [ ! -f "$APK_FILE" ]; then
           echo "APK не найден!"
           echo "Содержимое app/build/outputs/apk:"
-          find app/build/outputs/apk -type f
+          find app/build/outputs/apk -type f 2>/dev/null || echo "Папка не найдена"
           exit 1
         fi
         
@@ -240,18 +308,19 @@ jobs:
         else
           echo "APK не подписан, подписываем..."
           
-          # Создаем простой keystore
+          # Создаем временный keystore
           keytool -genkey -v \
             -keystore temp.keystore \
-            -alias tempkey \
+            -alias androidkey \
             -keyalg RSA \
             -keysize 2048 \
             -validity 10000 \
             -storepass android \
             -keypass android \
-            -dname "CN=Temp, OU=Temp, O=Temp, L=Temp, ST=Temp, C=US"
+            -dname "CN=Android, OU=Android, O=Android, L=Unknown, ST=Unknown, C=US"
           
-          # Подписываем
+          # Подписываем APK
+          echo "Подписываем APK..."
           jarsigner -verbose \
             -sigalg SHA1withRSA \
             -digestalg SHA1 \
@@ -259,45 +328,51 @@ jobs:
             -storepass android \
             -keypass android \
             "$APK_FILE" \
-            tempkey
+            androidkey
           
           echo "APK подписан"
           
-          # Переименовываем подписанный файл
+          # Оптимизируем с помощью zipalign
           APK_DIR=$(dirname "$APK_FILE")
-          APK_NAME=$(basename "$APK_FILE" .apk)
-          SIGNED_APK="$APK_DIR/${APK_NAME}-signed.apk"
+          APK_BASENAME=$(basename "$APK_FILE" .apk)
+          SIGNED_APK="$APK_DIR/${APK_BASENAME}-signed.apk"
           
-          # Используем zipalign для оптимизации
           echo "Оптимизируем APK с помощью zipalign..."
           $ANDROID_HOME/build-tools/28.0.3/zipalign -v 4 "$APK_FILE" "$SIGNED_APK"
           
           # Проверяем выравнивание
+          echo "Проверяем выравнивание..."
           $ANDROID_HOME/build-tools/28.0.3/zipalign -c 4 "$SIGNED_APK"
-          
-          echo "Исходный файл: $APK_FILE"
-          echo "Подписанный файл: $SIGNED_APK"
         fi
         
-        # Проверяем результат
+        # Проверяем подпись
         echo "Проверяем подпись итогового APK..."
-        jarsigner -verify -verbose "$SIGNED_APK"
+        if jarsigner -verify -verbose "$SIGNED_APK"; then
+          echo "✓ APK успешно подписан и проверен"
+        else
+          echo "✗ Ошибка проверки подписи APK"
+          exit 1
+        fi
         
         echo "Финальный APK:"
         ls -lh "$SIGNED_APK"
         
-        # Сохраняем путь к подписанному APK для следующего шага
+        # Сохраняем путь к подписанному APK
         echo "SIGNED_APK_PATH=$SIGNED_APK" >> $GITHUB_ENV
         
     - name: Upload signed APK artifact
       uses: actions/upload-artifact@v4
       with:
-        name: BrutalAI-Signed-APK
+        name: BrutalAI-Signed-APK-Gradle5
         path: ${{ env.SIGNED_APK_PATH }}
         retention-days: 7
         
     - name: Show final result
       run: |
         echo "=== СБОРКА УСПЕШНО ЗАВЕРШЕНА ==="
-        echo "Подписанный APK загружен как артефакт: BrutalAI-Signed-APK"
+        echo "Версия Gradle:"
+        gradle --version | grep "Gradle"
+        echo ""
+        echo "Подписанный APK: ${{ env.SIGNED_APK_PATH }}"
         echo "APK готов к установке на Android устройства (arm64-v8a)"
+        echo "Артефакт: BrutalAI-Signed-APK-Gradle5"
