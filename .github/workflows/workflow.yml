@@ -90,6 +90,36 @@ jobs:
         echo "sdk.dir=$ANDROID_HOME" > local.properties
         echo "ndk.dir=$ANDROID_NDK_HOME" >> local.properties
         
+    - name: Install Gradle manually
+      run: |
+        echo "Устанавливаем Gradle 4.10.3 вручную..."
+        
+        # Скачиваем Gradle напрямую с mirrors
+        cd /tmp
+        wget -q --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 -t 3 \
+          https://downloads.gradle-dn.com/distributions/gradle-4.10.3-bin.zip
+        
+        # Если не скачалось с первого зеркала, пробуем другое
+        if [ ! -f "gradle-4.10.3-bin.zip" ]; then
+          wget -q https://services.gradle.org/distributions/gradle-4.10.3-bin.zip
+        fi
+        
+        if [ ! -f "gradle-4.10.3-bin.zip" ]; then
+          echo "Не удалось скачать Gradle, используем альтернативный источник..."
+          wget -q https://mirrors.cloud.tencent.com/gradle/gradle-4.10.3-bin.zip
+        fi
+        
+        if [ -f "gradle-4.10.3-bin.zip" ]; then
+          echo "Распаковываем Gradle..."
+          sudo unzip -d /opt gradle-4.10.3-bin.zip
+          echo "GRADLE_HOME=/opt/gradle-4.10.3" >> $GITHUB_ENV
+          echo "PATH=/opt/gradle-4.10.3/bin:$PATH" >> $GITHUB_ENV
+          echo "Gradle установлен"
+        else
+          echo "ОШИБКА: Не удалось скачать Gradle!"
+          exit 1
+        fi
+        
     - name: Create signed build.gradle
       run: |
         echo "Создаем build.gradle с подписью..."
@@ -147,7 +177,6 @@ jobs:
         echo "Создаем release keystore..."
         cd app
         
-        # Создаем release keystore с фиксированными паролями для упрощения
         keytool -genkey -v \
           -keystore release.keystore \
           -alias androidkey \
@@ -158,8 +187,7 @@ jobs:
           -keypass android \
           -dname "CN=OpenXcom, OU=Android, O=OpenXcom, L=Unknown, ST=Unknown, C=US"
         
-        echo "Keystore создан:"
-        ls -la release.keystore
+        echo "Keystore создан"
         
     - name: Create gradle.properties for arm64
       run: |
@@ -200,32 +228,25 @@ jobs:
           sed -i '5033s/cost\[j\]\.Energy;/\/\/ cost[j].Energy;/' src/Battlescape/AIModule.cpp
         fi
         
-    - name: Setup Gradle wrapper
+    - name: Build with manual Gradle
       run: |
-        echo "Настраиваем Gradle wrapper..."
-        if [ -f "gradle/wrapper/gradle-wrapper.properties" ]; then
-          sed -i 's/gradle-.*-bin.zip/gradle-4.10.3-bin.zip/' gradle/wrapper/gradle-wrapper.properties
-        else
-          mkdir -p gradle/wrapper
-          echo "distributionBase=GRADLE_USER_HOME" > gradle/wrapper/gradle-wrapper.properties
-          echo "distributionPath=wrapper/dists" >> gradle/wrapper/gradle-wrapper.properties
-          echo "zipStoreBase=GRADLE_USER_HOME" >> gradle/wrapper/gradle-wrapper.properties
-          echo "zipStorePath=wrapper/dists" >> gradle/wrapper/gradle-wrapper.properties
-          echo "distributionUrl=https\://services.gradle.org/distributions/gradle-4.10.3-bin.zip" >> gradle/wrapper/gradle-wrapper.properties
-        fi
+        echo "Собираем APK с установленным Gradle..."
         
-    - name: Build signed release APK
-      run: |
-        echo "Собираем подписанный release APK..."
-        chmod +x gradlew
+        # Проверяем установку Gradle
+        echo "Проверяем версию Gradle:"
+        gradle -v
+        
+        echo "Переходим в директорию проекта..."
+        cd app
         
         echo "Очищаем проект..."
-        ./gradlew clean
+        gradle clean
         
         echo "Собираем Release APK с подписью..."
-        ./gradlew assembleRelease \
+        gradle assembleRelease \
           --no-daemon \
-          --stacktrace
+          --stacktrace \
+          --info
         
     - name: Verify APK signature
       run: |
