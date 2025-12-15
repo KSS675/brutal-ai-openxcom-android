@@ -1,63 +1,444 @@
-name: Sign APK from Direct URL
+name: Build and Sign BrutalAI Android APK (arm64-v8a only)
 
 on:
+  push:
+    branches: [ brutal-ai ]
+  pull_request:
+    branches: [ brutal-ai ]
   workflow_dispatch:
-    inputs:
-      artifact_url:
-        description: 'Direct URL to APK file'
-        required: true
-        default: 'https://nightly.link/KSS675/brutal-ai-openxcom-android/actions/runs/20215425684/BrutaIAI-Android-APK-arm64.zip'
 
 jobs:
-  sign-apk:
-    runs-on: ubuntu-latest
+  build-and-sign:
+    runs-on: ubuntu-22.04
     
     steps:
-    - name: Install Java
-      run: sudo apt-get update && sudo apt-get install -y openjdk-8-jre-headless wget
-      
-    - name: Download and extract APK
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        ref: brutal-ai
+        
+    - name: List directory contents
       run: |
-        # Скачиваем архив с APK
-        wget -q "${{ github.event.inputs.artifact_url }}" -O artifact.zip
+        echo "Содержимое директории:"
+        ls -la
+        echo "Содержимое app/src/main/jni:"
+        ls -la app/src/main/jni/ || echo "Папка не найдена"
         
-        # Распаковываем
-        unzip -q artifact.zip
-        
-        # Ищем APK файл
-        APK_FILE=$(find . -name "*.apk" -type f | head -1)
-        
-        if [ -z "$APK_FILE" ]; then
-          echo "APK не найден в архиве!"
-          ls -la
+    - name: Configure Git submodule to android branch
+      run: |
+        echo "Проверяем наличие подмодуля OpenXcom в app/src/main/jni..."
+        if [ -d "app/src/main/jni/OpenXcom" ]; then
+          echo "Переключаем сабмодуль на ветку android..."
+          cd app/src/main/jni/OpenXcom
+          git checkout android
+          git pull origin android
+          cd ../../../../..
+        else
+          echo "ОШИБКА: Подмодуль OpenXcom не найден!"
+          echo "Содержимое app/src/main/jni:"
+          ls -la app/src/main/jni/
           exit 1
         fi
         
-        echo "Найден APK: $APK_FILE"
-        echo "APK_FILE=$APK_FILE" >> $GITHUB_ENV
-        
-    - name: Sign the APK
+    - name: Set up JDK 8
       run: |
-        # Создаем keystore и подписываем
-        keytool -genkey -noprompt \
-          -keystore keystore.jks \
-          -alias app \
-          -keyalg RSA \
-          -keysize 2048 \
+        echo "Устанавливаем Java 8..."
+        sudo apt-get update
+        sudo apt-get install -y openjdk-8-jdk
+        echo "JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64" >> $GITHUB_ENV
+        
+    - name: Setup Android SDK
+      run: |
+        echo "Устанавливаем Android SDK..."
+        cd $HOME
+        mkdir -p android-sdk
+        cd android-sdk
+        wget -q https://dl.google.com/android/repository/sdk-tools-linux-4333796.zip
+        unzip -q sdk-tools-linux-4333796.zip
+        rm sdk-tools-linux-4333796.zip
+        
+        # Даем права на выполнение
+        chmod -R +x tools/bin/
+        
+        echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
+        echo "PATH=$ANDROID_HOME/tools/bin:$ANDROID_HOME/platform-tools:$PATH" >> $GITHUB_ENV
+        
+    - name: Accept Android licenses
+      run: |
+        echo "Принимаем лицензии Android SDK..."
+        yes | $ANDROID_HOME/tools/bin/sdkmanager --licenses || true
+        
+    - name: Install Android platforms and build-tools
+      run: |
+        echo "Устанавливаем Android platform 28 и build-tools 28.0.3..."
+        $ANDROID_HOME/tools/bin/sdkmanager "platforms;android-28" "platform-tools" "build-tools;28.0.3"
+        
+    - name: Download Android NDK 18b
+      run: |
+        echo "Скачиваем Android NDK 18b..."
+        cd $HOME
+        wget -q https://dl.google.com/android/repository/android-ndk-r18b-linux-x86_64.zip
+        unzip -q android-ndk-r18b-linux-x86_64.zip
+        rm android-ndk-r18b-linux-x86_64.zip
+        echo "ANDROID_NDK_HOME=$HOME/android-ndk-r18b" >> $GITHUB_ENV
+        echo "NDK_HOME=$HOME/android-ndk-r18b" >> $GITHUB_ENV
+        echo "PATH=$ANDROID_NDK_HOME:$PATH" >> $GITHUB_ENV
+        
+    - name: Create local.properties
+      run: |
+        echo "Создаем local.properties..."
+        echo "sdk.dir=$ANDROID_HOME" > local.properties
+        echo "ndk.dir=$ANDROID_NDK_HOME" >> local.properties
+        cat local.properties
+        
+    - name: Fix app/build.gradle syntax
+      run: |
+        echo "Исправляем синтаксис build.gradle..."
+        if [ -f "app/build.gradle" ]; then
+          echo "Создаем резервную копию build.gradle..."
+          cp app/build.gradle app/build.gradle.backup
+          
+          echo "Проверяем текущий build.gradle..."
+          echo "=== Первые 30 строк build.gradle ==="
+          head -30 app/build.gradle
+          echo "==================================="
+          
+          # Исправляем возможные синтаксические ошибки
+          echo "Исправляем синтаксис..."
+          
+          # Добавляем блок signingConfigs для релизной версии
+          if ! grep -q "signingConfigs" app/build.gradle; then
+            echo "Добавляем signingConfigs в build.gradle..."
+            # Вставляем после android { и перед buildTypes
+            sed -i '/android {/a\
+    signingConfigs {\
+        release {\
+            storeFile file(System.getProperty("user.home") + "/release.keystore")\
+            storePassword ""\
+            keyAlias ""\
+            keyPassword ""\
+        }\
+    }' app/build.gradle
+            
+            # Обновляем release buildType чтобы использовать signingConfig
+            if grep -q "buildTypes {" app/build.gradle; then
+              sed -i '/buildTypes {/,/}/ {
+                /release {/,/}/ {
+                  /minifyEnabled/a\
+            signingConfig signingConfigs.release
+                }
+              }' app/build.gradle
+            fi
+          fi
+          
+          # Создаем минимальный корректный build.gradle если текущий сломан
+          if ! grep -q "android {" app/build.gradle; then
+            echo "Создаем новый build.gradle с правильным синтаксисом..."
+            echo "apply plugin: 'com.android.application'" > app/build.gradle
+            echo "" >> app/build.gradle
+            echo "android {" >> app/build.gradle
+            echo "    compileSdkVersion 28" >> app/build.gradle
+            echo "    buildToolsVersion \"28.0.3\"" >> app/build.gradle
+            echo "" >> app/build.gradle
+            echo "    signingConfigs {" >> app/build.gradle
+            echo "        release {" >> app/build.gradle
+            echo "            storeFile file(System.getProperty(\"user.home\") + \"/release.keystore\")" >> app/build.gradle
+            echo "            storePassword \"\"" >> app/build.gradle
+            echo "            keyAlias \"\"" >> app/build.gradle
+            echo "            keyPassword \"\"" >> app/build.gradle
+            echo "        }" >> app/build.gradle
+            echo "    }" >> app/build.gradle
+            echo "" >> app/build.gradle
+            echo "    defaultConfig {" >> app/build.gradle
+            echo "        applicationId \"org.openxcom\"" >> app/build.gradle
+            echo "        minSdkVersion 16" >> app/build.gradle
+            echo "        targetSdkVersion 28" >> app/build.gradle
+            echo "        versionCode 1" >> app/build.gradle
+            echo "        versionName \"1.0\"" >> app/build.gradle
+            echo "" >> app/build.gradle
+            echo "        ndk {" >> app/build.gradle
+            echo "            abiFilters \"arm64-v8a\"" >> app/build.gradle
+            echo "        }" >> app/build.gradle
+            echo "    }" >> app/build.gradle
+            echo "" >> app/build.gradle
+            echo "    buildTypes {" >> app/build.gradle
+            echo "        release {" >> app/build.gradle
+            echo "            minifyEnabled false" >> app/build.gradle
+            echo "            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'" >> app/build.gradle
+            echo "            signingConfig signingConfigs.release" >> app/build.gradle
+            echo "        }" >> app/build.gradle
+            echo "    }" >> app/build.gradle
+            echo "" >> app/build.gradle
+            echo "    externalNativeBuild {" >> app/build.gradle
+            echo "        cmake {" >> app/build.gradle
+            echo "            path \"src/main/jni/CMakeLists.txt\"" >> app/build.gradle
+            echo "            version \"3.10.2\"" >> app/build.gradle
+            echo "        }" >> app/build.gradle
+            echo "    }" >> app/build.gradle
+            echo "}" >> app/build.gradle
+            echo "" >> app/build.gradle
+            echo "dependencies {" >> app/build.gradle
+            echo "    implementation fileTree(dir: 'libs', include: ['*.jar'])" >> app/build.gradle
+            echo "}" >> app/build.gradle
+          else
+            echo "Используем существующий build.gradle, добавляем настройки arm64..."
+            # Проверяем и исправляем defaultConfig
+            if ! grep -q "ndk {" app/build.gradle; then
+              # Добавляем ndk блок после defaultConfig
+              sed -i '/defaultConfig {/,/}/ {
+                /}/i\
+        ndk {\
+            abiFilters "arm64-v8a"\
+        }
+              }' app/build.gradle
+            fi
+          fi
+          
+          echo "=== Исправленный build.gradle (первые 40 строк) ==="
+          head -40 app/build.gradle
+        else
+          echo "app/build.gradle не найден, создаем новый..."
+          mkdir -p app
+          # Создаем build.gradle с блоком signingConfigs как выше
+          echo "apply plugin: 'com.android.application'" > app/build.gradle
+          echo "" >> app/build.gradle
+          echo "android {" >> app/build.gradle
+          echo "    compileSdkVersion 28" >> app/build.gradle
+          echo "    buildToolsVersion \"28.0.3\"" >> app/build.gradle
+          echo "" >> app/build.gradle
+          echo "    signingConfigs {" >> app/build.gradle
+          echo "        release {" >> app/build.gradle
+          echo "            storeFile file(System.getProperty(\"user.home\") + \"/release.keystore\")" >> app/build.gradle
+          echo "            storePassword \"\"" >> app/build.gradle
+          echo "            keyAlias \"\"" >> app/build.gradle
+          echo "            keyPassword \"\"" >> app/build.gradle
+          echo "        }" >> app/build.gradle
+          echo "    }" >> app/build.gradle
+          echo "" >> app/build.gradle
+          echo "    defaultConfig {" >> app/build.gradle
+          echo "        applicationId \"org.openxcom\"" >> app/build.gradle
+          echo "        minSdkVersion 16" >> app/build.gradle
+          echo "        targetSdkVersion 28" >> app/build.gradle
+          echo "        versionCode 1" >> app/build.gradle
+          echo "        versionName \"1.0\"" >> app/build.gradle
+          echo "" >> app/build.gradle
+          echo "        ndk {" >> app/build.gradle
+          echo "            abiFilters \"arm64-v8a\"" >> app/build.gradle
+          echo "        }" >> app/build.gradle
+          echo "    }" >> app/build.gradle
+          echo "" >> app/build.gradle
+          echo "    buildTypes {" >> app/build.gradle
+          echo "        release {" >> app/build.gradle
+          echo "            minifyEnabled false" >> app/build.gradle
+          echo "            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'" >> app/build.gradle
+          echo "            signingConfig signingConfigs.release" >> app/build.gradle
+          echo "        }" >> app/build.gradle
+          echo "    }" >> app/build.gradle
+          echo "" >> app/build.gradle
+          echo "    externalNativeBuild {" >> app/build.gradle
+          echo "        cmake {" >> app/build.gradle
+          echo "            path \"src/main/jni/CMakeLists.txt\"" >> app/build.gradle
+          echo "            version \"3.10.2\"" >> app/build.gradle
+          echo "        }" >> app/build.gradle
+          echo "    }" >> app/build.gradle
+          echo "}" >> app/build.gradle
+          echo "" >> app/build.gradle
+          echo "dependencies {" >> app/build.gradle
+          echo "    implementation fileTree(dir: 'libs', include: ['*.jar'])" >> app/build.gradle
+          echo "}" >> app/build.gradle
+        fi
+        
+    - name: Create gradle.properties for arm64
+      run: |
+        echo "Создаем gradle.properties для arm64-v8a..."
+        echo "android.useDeprecatedNdk=true" > app/gradle.properties
+        echo "android.bundle.enableUncompressedNativeLibs=false" >> app/gradle.properties
+        
+    - name: Create Application.mk for arm64
+      run: |
+        echo "Создаем Application.mk для arm64-v8a..."
+        mkdir -p app/src/main/jni
+        echo "APP_ABI := arm64-v8a" > app/src/main/jni/Application.mk
+        echo "APP_PLATFORM := android-21" >> app/src/main/jni/Application.mk
+        echo "APP_STL := c++_static" >> app/src/main/jni/Application.mk
+        echo "APP_CPPFLAGS := -std=c++11 -frtti -fexceptions -Wno-error=unused-value -Wno-error=dangling-else" >> app/src/main/jni/Application.mk
+        
+    - name: Fix SDL1 to SDL2 compatibility issues
+      run: |
+        echo "Исправляем проблемы совместимости SDL1 и SDL2..."
+        cd app/src/main/jni/OpenXcom
+        
+        # 1. Исправляем SDLKey на SDL_Keycode
+        echo "Исправляем SDLKey на SDL_Keycode..."
+        find . -type f \( -name "*.h" -o -name "*.cpp" -o -name "*.hpp" -o -name "*.inc" \) -exec sed -i 's/SDLKey/SDL_Keycode/g' {} \;
+        
+        # 2. Исправляем SDL_BUTTON_WHEELUP и SDL_BUTTON_WHEELDOWN
+        echo "Исправляем кнопки колесика мыши..."
+        find . -type f \( -name "*.cpp" -o -name "*.h" -o -name "*.c" \) -exec sed -i 's/SDL_BUTTON_WHEELUP/4/g' {} \;
+        find . -type f \( -name "*.cpp" -o -name "*.h" -o -name "*.c" \) -exec sed -i 's/SDL_BUTTON_WHEELDOWN/5/g' {} \;
+        
+        # 3. Исправляем SDL_WarpMouse
+        echo "Исправляем SDL_WarpMouse..."
+        find . -type f \( -name "*.cpp" -o -name "*.h" -o -name "*.c" \) -exec sed -i 's/SDL_WarpMouse(/SDL_WarpMouseInWindow(NULL, /g' {} \;
+        
+        echo "Проверяем исправления..."
+        echo "Найдены SDL_Keycode:"
+        grep -r "SDL_Keycode" . --include="*.cpp" --include="*.h" | wc -l
+        
+    - name: Fix warnings in BrutalAI
+      run: |
+        echo "Исправляем предупреждения компилятора..."
+        cd app/src/main/jni/OpenXcom
+        
+        # Восстанавливаем оригинальный макрос Log в Logger.h
+        echo "Восстанавливаем оригинальный макрос Log..."
+        if [ -f "src/Engine/Logger.h" ]; then
+          # Восстанавливаем оригинальный макрос Log
+          sed -i 's/#define Log(level) do { if (level <= Logger::reportingLevel()) { Logger().get(level); } } while (0)/#define Log(level) if (level > Logger::reportingLevel()) { } else Logger().get(level)/' src/Engine/Logger.h || true
+          echo "Logger.h восстановлен"
+        else
+          echo "Logger.h не найден"
+        fi
+        
+        # Закомментируем неиспользуемые строки в AIModule.cpp
+        echo "Закомментируем неиспользуемые значения в AIModule.cpp..."
+        if [ -f "src/Battlescape/AIModule.cpp" ]; then
+          # Закомментируем строки 5032 и 5033
+          sed -i '5032s/cost\[j\]\.Time;/\/\/ cost[j].Time;/' src/Battlescape/AIModule.cpp
+          sed -i '5033s/cost\[j\]\.Energy;/\/\/ cost[j].Energy;/' src/Battlescape/AIModule.cpp
+          echo "AIModule.cpp исправлен"
+        else
+          echo "AIModule.cpp не найден"
+        fi
+        
+    - name: Update gradle wrapper
+      run: |
+        echo "Обновляем Gradle wrapper до 4.10.3..."
+        if [ -f "gradle/wrapper/gradle-wrapper.properties" ]; then
+          sed -i 's/gradle-.*-bin.zip/gradle-4.10.3-bin.zip/' gradle/wrapper/gradle-wrapper.properties
+          echo "Gradle wrapper обновлен"
+        else
+          echo "gradle-wrapper.properties не найден, создаем..."
+          mkdir -p gradle/wrapper
+          echo "distributionBase=GRADLE_USER_HOME" > gradle/wrapper/gradle-wrapper.properties
+          echo "distributionPath=wrapper/dists" >> gradle/wrapper/gradle-wrapper.properties
+          echo "zipStoreBase=GRADLE_USER_HOME" >> gradle/wrapper/gradle-wrapper.properties
+          echo "zipStorePath=wrapper/dists" >> gradle/wrapper/gradle-wrapper.properties
+          echo "distributionUrl=https\://services.gradle.org/distributions/gradle-4.10.3-bin.zip" >> gradle/wrapper/gradle-wrapper.properties
+        fi
+        
+    - name: Create Keystore for signing (if not using existing)
+      if: ${{ !secrets.SIGNING_KEY_BASE64 }}
+      run: |
+        echo "Создаем новый keystore для подписи..."
+        keytool -genkeypair -v \
+          -keystore release.keystore \
+          -keyalg RSA -keysize 2048 \
           -validity 10000 \
-          -storepass password \
-          -keypass password \
-          -dname "CN=BrutalAI"
+          -alias appalias \
+          -dname "CN=BrutalAI, OU=Android, O=OpenXcom, L=Unknown, ST=Unknown, C=US" \
+          -storepass android \
+          -keypass android
         
-        jarsigner -keystore keystore.jks \
-          -storepass password \
-          -keypass password \
-          "${{ env.APK_FILE }}" app
+        echo "Keystore создан:"
+        ls -la release.keystore
         
-        echo "APK подписан"
+        # Копируем keystore в домашнюю директорию для использования в build.gradle
+        cp release.keystore ~/release.keystore
         
-    - name: Upload result
-      uses: actions/upload-artifact@v4
-      with:
-        name: Signed-APK
-        path: ${{ env.APK_FILE }}
+    - name: Decode Keystore from secrets (if using existing)
+      if: ${{ secrets.SIGNING_KEY_BASE64 }}
+      run: |
+        echo "Декодируем keystore из секретов..."
+        echo "${{ secrets.SIGNING_KEY_BASE64 }}" | base64 --decode > release.keystore
+        
+        echo "Копируем keystore в домашнюю директорию для использования в build.gradle..."
+        cp release.keystore ~/release.keystore
+        
+        echo "Проверяем созданный keystore..."
+        ls -la release.keystore
+        
+    - name: Build with Gradle
+      env:
+        # Переменные для автоматической подписи
+        RELEASE_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD || 'android' }}
+        RELEASE_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || 'android' }}
+        RELEASE_KEY_ALIAS: ${{ secrets.KEY_ALIAS || 'appalias' }}
+      run: |
+        echo "Собираем APK с Gradle..."
+        
+        # Даем права на выполнение
+        chmod +x gradlew
+        
+        # Проверяем конфигурацию Gradle
+        echo "Проверяем Gradle конфигурацию..."
+        ./gradlew --version
+        
+        # Обновляем build.gradle с актуальными паролями из переменных окружения
+        echo "Обновляем пароли в build.gradle..."
+        sed -i "s/storePassword \\\"\\\"/storePassword \\\"$RELEASE_STORE_PASSWORD\\\"/" app/build.gradle
+        sed -i "s/keyAlias \\\"\\\"/keyAlias \\\"$RELEASE_KEY_ALIAS\\\"/" app/build.gradle
+        sed -i "s/keyPassword \\\"\\\"/keyPassword \\\"$RELEASE_KEY_PASSWORD\\\"/" app/build.gradle
+        
+        # Очищаем и собираем
+        echo "Начинаем сборку APK..."
+        ./gradlew clean
+        
+        echo "Собираем Release APK для arm64-v8a с подписью..."
+        ./gradlew assembleRelease \
+          --no-daemon \
+          --stacktrace \
+          -Pandroid.injected.build.abi=arm64-v8a \
+          -Pandroid.injected.signing.store.file="$HOME/release.keystore" \
+          -Pandroid.injected.signing.store.password="$RELEASE_STORE_PASSWORD" \
+          -Pandroid.injected.signing.key.alias="$RELEASE_KEY_ALIAS" \
+          -Pandroid.injected.signing.key.password="$RELEASE_KEY_PASSWORD"
+        
+    - name: Check build results
+      run: |
+        echo "Проверяем результаты сборки..."
+        if [ -d "app/build/outputs/apk" ]; then
+          echo "Найденные APK файлы:"
+          find app/build/outputs/apk -name "*.apk" -type f | xargs ls -la
+          
+          # Проверяем, подписан ли APK
+          echo "Проверяем подпись APK..."
+          for apk in $(find app/build/outputs/apk -name "*release*.apk" -type f); do
+            echo "Проверка $apk:"
+            jarsigner -verify -verbose "$apk" && echo "✓ APK подписан корректно" || echo "✗ APK не подписан или подпись неверна"
+          done
+          
+          if [ $(find app/build/outputs/apk -name "*.apk" -type f | wc -l) -eq 0 ]; then
+            echo "ОШИБКА: APK файлы не собраны!"
+            echo "Содержимое app/build/outputs/apk:"
+            ls -la app/build/outputs/apk/
+            exit 1
+          fi
+        else
+          echo "ОШИБКА: Папка app/build/outputs/apk не существует!"
+          echo "Содержимое app/build:"
+          ls -la app/build/
+          exit 1
+        fi
+        
+    - name: Sign APK with external tool (fallback)
+      if: failure()  # Запускается только если предыдущий шаг не создал подписанный APK
+      run: |
+        echo "Используем альтернативный метод подписи APK..."
+        
+        # Находим unsigned APK
+        UNSIGNED_APK=$(find app/build/outputs/apk -name "*release*.apk" ! -name "*signed*" -type f | head -1)
+        
+        if [ -z "$UNSIGNED_APK" ]; then
+          echo "Не найден unsigned APK для подписи"
+          exit 1
+        fi
+        
+        echo "Подписываем APK: $UNSIGNED_APK"
+        
+        # Подписываем APK
+        jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
+          -keystore release.keystore \
+          -storepass "${{ secrets.KEY_STORE_PASSWORD || 'android' }}" \
+          -keypass "${{ secrets.KEY_PASSWORD || 'android'
