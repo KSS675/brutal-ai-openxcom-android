@@ -1,4 +1,4 @@
-name: Build BrutalAI Android APK
+name: Build BrutalAI Android APK (arm64-v8a only)
 
 on:
   push:
@@ -12,295 +12,312 @@ jobs:
     runs-on: ubuntu-22.04
     
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        submodules: recursive
-        ref: brutal-ai
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          ref: brutal-ai
         
-    - name: List directory contents
-      run: |
-        echo "Содержимое директории:"
-        ls -la
-        echo "Содержимое app/src/main/jni:"
-        ls -la app/src/main/jni/ || echo "Папка не найдена"
-        
-    - name: Configure Git submodule to android branch
-      run: |
-        echo "Проверяем наличие подмодуля OpenXcom в app/src/main/jni..."
-        if [ -d "app/src/main/jni/OpenXcom" ]; then
-          echo "Переключаем сабмодуль на ветку android..."
-          cd app/src/main/jni/OpenXcom
-          git checkout android
-          git pull origin android
-          cd ../../../../..
-        else
-          echo "ОШИБКА: Подмодуль OpenXcom не найден!"
+      - name: List directory contents
+        run: |
+          echo "Содержимое директории:"
+          ls -la
           echo "Содержимое app/src/main/jni:"
-          ls -la app/src/main/jni/
-          exit 1
-        fi
+          ls -la app/src/main/jni/ || echo "Папка не найдена"
         
-    - name: Set up JDK 8
-      run: |
-        echo "Устанавливаем Java 8..."
-        sudo apt-get update
-        sudo apt-get install -y openjdk-8-jdk
-        echo "JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64" >> $GITHUB_ENV
-        
-    - name: Setup Android SDK
-      run: |
-        echo "Устанавливаем Android SDK..."
-        cd $HOME
-        mkdir -p android-sdk
-        cd android-sdk
-        wget -q https://dl.google.com/android/repository/sdk-tools-linux-4333796.zip
-        unzip -q sdk-tools-linux-4333796.zip
-        rm sdk-tools-linux-4333796.zip
-        
-        # Даем права на выполнение
-        chmod -R +x tools/bin/
-        
-        echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
-        echo "PATH=$ANDROID_HOME/tools/bin:$ANDROID_HOME/platform-tools:$PATH" >> $GITHUB_ENV
-        
-    - name: Accept Android licenses
-      run: |
-        echo "Принимаем лицензии Android SDK..."
-        yes | $ANDROID_HOME/tools/bin/sdkmanager --licenses || true
-        
-    - name: Install Android platforms and build-tools
-      run: |
-        echo "Устанавливаем Android platform 28 и build-tools 28.0.3..."
-        $ANDROID_HOME/tools/bin/sdkmanager "platforms;android-28" "platform-tools" "build-tools;28.0.3"
-        
-    - name: Download Android NDK 18b
-      run: |
-        echo "Скачиваем Android NDK 18b..."
-        cd $HOME
-        wget -q https://dl.google.com/android/repository/android-ndk-r18b-linux-x86_64.zip
-        unzip -q android-ndk-r18b-linux-x86_64.zip
-        rm android-ndk-r18b-linux-x86_64.zip
-        echo "ANDROID_NDK_HOME=$HOME/android-ndk-r18b" >> $GITHUB_ENV
-        echo "NDK_HOME=$HOME/android-ndk-r18b" >> $GITHUB_ENV
-        echo "PATH=$ANDROID_NDK_HOME:$PATH" >> $GITHUB_ENV
-        
-    - name: Create local.properties
-      run: |
-        echo "Создаем local.properties..."
-        echo "sdk.dir=$ANDROID_HOME" > local.properties
-        echo "ndk.dir=$ANDROID_NDK_HOME" >> local.properties
-        cat local.properties
-        
-    - name: Fix AndroidManifest.xml for installation
-      run: |
-        echo "Исправляем AndroidManifest.xml для установки..."
-        cd app/src/main
-        
-        # Проверяем наличие AndroidManifest.xml
-        if [ -f "AndroidManifest.xml" ]; then
-          echo "Исправляем AndroidManifest.xml..."
-          
-          # 1. Убедимся, что есть разрешение на запись во внешнее хранилище (для данных игры)
-          if ! grep -q "android.permission.WRITE_EXTERNAL_STORAGE" AndroidManifest.xml; then
-            sed -i '/<manifest/a\    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />' AndroidManifest.xml
-          fi
-          
-          # 2. Убедимся, что есть разрешение на чтение внешнего хранилища
-          if ! grep -q "android.permission.READ_EXTERNAL_STORAGE" AndroidManifest.xml; then
-            sed -i '/<manifest/a\    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />' AndroidManifest.xml
-          fi
-          
-          # 3. Для Android 8+ нужно явно запрашивать разрешения
-          if ! grep -q "android.permission.REQUEST_INSTALL_PACKAGES" AndroidManifest.xml; then
-            sed -i '/<manifest/a\    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />' AndroidManifest.xml
-          fi
-          
-          # 4. Добавляем атрибут android:extractNativeLibs="true" если его нет
-          sed -i 's/<application /<application android:extractNativeLibs="true" /' AndroidManifest.xml
-          
-          # 5. Убедимся, что minSdkVersion в манифесте не выше, чем в build.gradle
-          echo "Содержимое AndroidManifest.xml после изменений:"
-          head -50 AndroidManifest.xml
-        else
-          echo "AndroidManifest.xml не найден!"
-        fi
-        cd ../../..
-        
-    - name: Configure build for arm64-v8a only
-      run: |
-        echo "Настраиваем сборку только для arm64-v8a..."
-        cd app
-        
-        # 1. Создаем gradle.properties для ограничения архитектур
-        echo "android.useDeprecatedNdk=true" > gradle.properties
-        echo "android.bundle.enableUncompressedNativeLibs=false" >> gradle.properties
-        echo "android.defaults.buildfeatures.renderscript=false" >> gradle.properties
-        echo "android.defaults.buildfeatures.shaders=false" >> gradle.properties
-        
-        # 2. Модифицируем build.gradle
-        if [ -f "build.gradle" ]; then
-          echo "Модифицируем build.gradle..."
-          
-          # Удаляем все старые abiFilters и добавляем только arm64-v8a
-          sed -i 's/abiFilters .*/abiFilters "arm64-v8a"/g' build.gradle
-          
-          # Добавляем abiFilters в defaultConfig если нет
-          if ! grep -q 'abiFilters' build.gradle; then
-            sed -i '/defaultConfig\s*{/,/}/ s/defaultConfig\s*{/defaultConfig {\n        ndk {\n            abiFilters "arm64-v8a"\n        }/' build.gradle
-          fi
-          
-          # Устанавливаем versionCode и versionName
-          sed -i '/defaultConfig\s*{/,/}/ s/versionCode .*/versionCode 1/' build.gradle || true
-          sed -i '/defaultConfig\s*{/,/}/ s/versionName .*/versionName "1.0"/' build.gradle || true
-          
-          # Устанавливаем minSdkVersion 21 (Android 5.0) для arm64-v8a
-          sed -i '/defaultConfig\s*{/,/}/ s/minSdkVersion .*/minSdkVersion 21/' build.gradle || true
-          sed -i 's/minSdkVersion [0-9]*/minSdkVersion 21/g' build.gradle || true
-          
-          # Устанавливаем targetSdkVersion 28
-          sed -i '/defaultConfig\s*{/,/}/ s/targetSdkVersion .*/targetSdkVersion 28/' build.gradle || true
-          sed -i 's/targetSdkVersion [0-9]*/targetSdkVersion 28/g' build.gradle || true
-          
-          # Включаем сжатие native библиотек
-          if ! grep -q 'android:extractNativeLibs' build.gradle; then
-            sed -i '/android\s*{/,/}/ s/android\s*{/android {\n    packagingOptions {\n        jniLibs {\n            useLegacyPackaging = true\n        }\n    }/' build.gradle || true
-          fi
-          
-          echo "Содержимое build.gradle после изменений:"
-          grep -n "version\|minSdk\|targetSdk\|abiFilters" build.gradle
-        fi
-        cd ..
-        
-    - name: Fix SDL1 to SDL2 compatibility issues
-      run: |
-        echo "Исправляем проблемы совместимости SDL1 и SDL2..."
-        cd app/src/main/jni/OpenXcom
-        
-        # 1. Исправляем SDLKey на SDL_Keycode
-        echo "Исправляем SDLKey на SDL_Keycode..."
-        find . -type f \( -name "*.h" -o -name "*.cpp" -o -name "*.hpp" -o -name "*.inc" \) -exec sed -i 's/SDLKey/SDL_Keycode/g' {} \;
-        
-        # 2. Исправляем SDL_BUTTON_WHEELUP и SDL_BUTTON_WHEELDOWN
-        echo "Исправляем кнопки колесика мыши..."
-        find . -type f \( -name "*.cpp" -o -name "*.h" -o -name "*.c" \) -exec sed -i 's/SDL_BUTTON_WHEELUP/4/g' {} \;
-        find . -type f \( -name "*.cpp" -o -name "*.h" -o -name "*.c" \) -exec sed -i 's/SDL_BUTTON_WHEELDOWN/5/g' {} \;
-        
-        # 3. Исправляем SDL_WarpMouse
-        echo "Исправляем SDL_WarpMouse..."
-        find . -type f \( -name "*.cpp" -o -name "*.h" -o -name "*.c" \) -exec sed -i 's/SDL_WarpMouse(/SDL_WarpMouseInWindow(NULL, /g' {} \;
-        
-        # 4. Исправляем SDL_WM_GrabInput
-        echo "Исправляем SDL_WM_GrabInput..."
-        find . -type f \( -name "*.cpp" -o -name "*.h" -o -name "*.c" \) -exec sed -i 's/SDL_WM_GrabInput(\(.*\));/SDL_SetWindowGrab(SDL_GL_GetCurrentWindow(), \1 ? SDL_TRUE : SDL_FALSE);/g' {} \;
-        
-        echo "Проверяем исправления..."
-        echo "Найдены SDL_Keycode:"
-        grep -r "SDL_Keycode" . --include="*.cpp" --include="*.h" | wc -l
-        
-    - name: Fix warnings in BrutalAI
-      run: |
-        echo "Исправляем предупреждения компилятора..."
-        cd app/src/main/jni/OpenXcom
-        
-        # Восстанавливаем оригинальный макрос Log в Logger.h
-        echo "Восстанавливаем оригинальный макрос Log..."
-        if [ -f "src/Engine/Logger.h" ]; then
-          sed -i '69s/#define Log(level) do { if (level <= Logger::reportingLevel()) { Logger().get(level); } } while (0)/#define Log(level) if (level > Logger::reportingLevel()) { } else Logger().get(level)/' src/Engine/Logger.h || true
-          sed -i '69s/#define Log(level) if (level <= Logger::reportingLevel()) { Logger().get(level); }/#define Log(level) if (level > Logger::reportingLevel()) { } else Logger().get(level)/' src/Engine/Logger.h || true
-          echo "Logger.h восстановлен"
-        else
-          echo "Logger.h не найден"
-        fi
-        
-        # Закомментируем неиспользуемые строки в AIModule.cpp
-        echo "Закомментируем неиспользуемые значения в AIModule.cpp..."
-        if [ -f "src/Battlescape/AIModule.cpp" ]; then
-          sed -i '5032s/cost\[j\]\.Time;/\/\/ cost[j].Time;/' src/Battlescape/AIModule.cpp
-          sed -i '5033s/cost\[j\]\.Energy;/\/\/ cost[j].Energy;/' src/Battlescape/AIModule.cpp
-          echo "AIModule.cpp исправлен"
-        else
-          echo "AIModule.cpp не найден"
-        fi
-        
-    - name: Disable warnings as errors
-      run: |
-        echo "Отключаем трактовку предупреждений как ошибок..."
-        cd app
-        
-        if [ -f "build.gradle" ]; then
-          if grep -q "cppFlags" build.gradle; then
-            sed -i '/cppFlags/ s/"-Werror"/"-Wno-error=unused-value -Wno-error=dangling-else -Wno-error"/' build.gradle || true
-            sed -i '/cppFlags/ s/""/"-Wno-error=unused-value -Wno-error=dangling-else -Wno-error"/' build.gradle || true
+      - name: Configure Git submodule to android branch
+        run: |
+          echo "Проверяем наличие подмодуля OpenXcom в app/src/main/jni..."
+          if [ -d "app/src/main/jni/OpenXcom" ]; then
+            echo "Переключаем сабмодуль на ветку android..."
+            cd app/src/main/jni/OpenXcom
+            git checkout android
+            git pull origin android
+            cd ../../../../..
           else
-            sed -i '/externalNativeBuild {/,/}/ s/cmake {/cmake {\n                cppFlags "-Wno-error=unused-value -Wno-error=dangling-else -Wno-error"/' build.gradle || true
+            echo "ОШИБКА: Подмодуль OpenXcom не найден!"
+            echo "Содержимое app/src/main/jni:"
+            ls -la app/src/main/jni/
+            exit 1
           fi
-          echo "build.gradle модифицирован"
-        else
-          echo "build.gradle не найден"
-        fi
         
-    - name: Build Debug APK (для тестирования)
-      run: |
-        echo "Собираем Debug APK для тестирования установки..."
+      - name: Set up JDK 8
+        run: |
+          echo "Устанавливаем Java 8..."
+          sudo apt-get update
+          sudo apt-get install -y openjdk-8-jdk
+          echo "JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64" >> $GITHUB_ENV
         
-        # Устанавливаем конкретную версию Gradle wrapper
-        sed -i 's/gradle-.*-bin.zip/gradle-4.10.3-bin.zip/' gradle/wrapper/gradle-wrapper.properties
-        
-        # Даем права на выполнение
-        chmod +x gradlew
-        
-        # Собираем Debug APK (легче устанавливается)
-        ./gradlew clean assembleDebug --no-daemon --stacktrace
-        
-    - name: Verify APK structure
-      run: |
-        echo "Проверяем структуру APK..."
-        
-        # Устанавливаем apktool для анализа APK
-        sudo apt-get update
-        sudo apt-get install -y apktool
-        
-        # Ищем APK файл
-        APK_FILE=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
-        
-        if [ -f "$APK_FILE" ]; then
-          echo "APK найден: $APK_FILE"
+      - name: Setup Android SDK
+        run: |
+          echo "Устанавливаем Android SDK..."
+          cd $HOME
+          mkdir -p android-sdk
+          cd android-sdk
+          wget -q https://dl.google.com/android/repository/sdk-tools-linux-4333796.zip
+          unzip -q sdk-tools-linux-4333796.zip
+          rm sdk-tools-linux-4333796.zip
           
-          # Анализируем APK
-          echo "Размер APK:"
-          ls -lh "$APK_FILE"
+          chmod -R +x tools/bin/
           
-          echo "Содержимое APK (native библиотеки):"
-          unzip -l "$APK_FILE" | grep -E "\.so$" || echo "Native библиотеки не найдены"
+          echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
+          echo "PATH=$ANDROID_HOME/tools/bin:$ANDROID_HOME/platform-tools:$PATH" >> $GITHUB_ENV
+        
+      - name: Accept Android licenses
+        run: |
+          echo "Принимаем лицензии Android SDK..."
+          yes | $ANDROID_HOME/tools/bin/sdkmanager --licenses || true
+        
+      - name: Install Android platforms and build-tools
+        run: |
+          echo "Устанавливаем Android platform 28 и build-tools 28.0.3..."
+          $ANDROID_HOME/tools/bin/sdkmanager "platforms;android-28" "platform-tools" "build-tools;28.0.3"
+        
+      - name: Download Android NDK 18b
+        run: |
+          echo "Скачиваем Android NDK 18b..."
+          cd $HOME
+          wget -q https://dl.google.com/android/repository/android-ndk-r18b-linux-x86_64.zip
+          unzip -q android-ndk-r18b-linux-x86_64.zip
+          rm android-ndk-r18b-linux-x86_64.zip
+          echo "ANDROID_NDK_HOME=$HOME/android-ndk-r18b" >> $GITHUB_ENV
+          echo "NDK_HOME=$HOME/android-ndk-r18b" >> $GITHUB_ENV
+          echo "PATH=$ANDROID_NDK_HOME:$PATH" >> $GITHUB_ENV
+        
+      - name: Create local.properties
+        run: |
+          echo "Создаем local.properties..."
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          echo "ndk.dir=$ANDROID_NDK_HOME" >> local.properties
+          echo "Содержимое local.properties:"
+          echo "sdk.dir=$ANDROID_HOME"
+          echo "ndk.dir=$ANDROID_NDK_HOME"
+        
+      - name: Fix app/build.gradle syntax
+        run: |
+          echo "Исправляем синтаксис build.gradle..."
+          if [ -f "app/build.gradle" ]; then
+            echo "Создаем резервную копию build.gradle..."
+            cp app/build.gradle app/build.gradle.backup
+            
+            echo "Проверяем текущий build.gradle..."
+            echo "=== Первые 30 строк build.gradle ==="
+            head -30 app/build.gradle
+            echo "==================================="
+            
+            echo "Исправляем синтаксис..."
+            
+            if ! grep -q "android {" app/build.gradle; then
+              echo "Создаем новый build.gradle с правильным синтаксисом..."
+              echo "apply plugin: 'com.android.application'" > app/build.gradle
+              echo "" >> app/build.gradle
+              echo "android {" >> app/build.gradle
+              echo "    compileSdkVersion 28" >> app/build.gradle
+              echo "    buildToolsVersion \"28.0.3\"" >> app/build.gradle
+              echo "" >> app/build.gradle
+              echo "    defaultConfig {" >> app/build.gradle
+              echo "        applicationId \"org.openxcom\"" >> app/build.gradle
+              echo "        minSdkVersion 16" >> app/build.gradle
+              echo "        targetSdkVersion 28" >> app/build.gradle
+              echo "        versionCode 1" >> app/build.gradle
+              echo "        versionName \"1.0\"" >> app/build.gradle
+              echo "" >> app/build.gradle
+              echo "        ndk {" >> app/build.gradle
+              echo "            abiFilters \"arm64-v8a\"" >> app/build.gradle
+              echo "        }" >> app/build.gradle
+              echo "    }" >> app/build.gradle
+              echo "" >> app/build.gradle
+              echo "    buildTypes {" >> app/build.gradle
+              echo "        release {" >> app/build.gradle
+              echo "            minifyEnabled false" >> app/build.gradle
+              echo "            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'" >> app/build.gradle
+              echo "        }" >> app/build.gradle
+              echo "    }" >> app/build.gradle
+              echo "" >> app/build.gradle
+              echo "    externalNativeBuild {" >> app/build.gradle
+              echo "        cmake {" >> app/build.gradle
+              echo "            path \"src/main/jni/CMakeLists.txt\"" >> app/build.gradle
+              echo "            version \"3.10.2\"" >> app/build.gradle
+              echo "        }" >> app/build.gradle
+              echo "    }" >> app/build.gradle
+              echo "}" >> app/build.gradle
+              echo "" >> app/build.gradle
+              echo "dependencies {" >> app/build.gradle
+              echo "    implementation fileTree(dir: 'libs', include: ['*.jar'])" >> app/build.gradle
+              echo "}" >> app/build.gradle
+            else
+              echo "Используем существующий build.gradle, добавляем настройки arm64..."
+              if ! grep -q "ndk {" app/build.gradle; then
+                echo "Добавляем блок ndk в defaultConfig..."
+                TEMP_FILE=$(mktemp)
+                awk '/defaultConfig {/,/}/ {
+                  if ($0 ~ /}/) {
+                    print "        ndk {"
+                    print "            abiFilters \"arm64-v8a\""
+                    print "        }"
+                  }
+                  print
+                } !/defaultConfig {/,/}/' app/build.gradle > "$TEMP_FILE"
+                mv "$TEMP_FILE" app/build.gradle
+              fi
+            fi
+            
+            echo "=== Исправленный build.gradle (первые 40 строк) ==="
+            head -40 app/build.gradle
+          else
+            echo "app/build.gradle не найден, создаем новый..."
+            mkdir -p app
+            echo "apply plugin: 'com.android.application'" > app/build.gradle
+            echo "" >> app/build.gradle
+            echo "android {" >> app/build.gradle
+            echo "    compileSdkVersion 28" >> app/build.gradle
+            echo "    buildToolsVersion \"28.0.3\"" >> app/build.gradle
+            echo "" >> app/build.gradle
+            echo "    defaultConfig {" >> app/build.gradle
+            echo "        applicationId \"org.openxcom\"" >> app/build.gradle
+            echo "        minSdkVersion 16" >> app/build.gradle
+            echo "        targetSdkVersion 28" >> app/build.gradle
+            echo "        versionCode 1" >> app/build.gradle
+            echo "        versionName \"1.0\"" >> app/build.gradle
+            echo "" >> app/build.gradle
+            echo "        ndk {" >> app/build.gradle
+            echo "            abiFilters \"arm64-v8a\"" >> app/build.gradle
+            echo "        }" >> app/build.gradle
+            echo "    }" >> app/build.gradle
+            echo "" >> app/build.gradle
+            echo "    buildTypes {" >> app/build.gradle
+            echo "        release {" >> app/build.gradle
+            echo "            minifyEnabled false" >> app/build.gradle
+            echo "            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'" >> app/build.gradle
+            echo "        }" >> app/build.gradle
+            echo "    }" >> app/build.gradle
+            echo "" >> app/build.gradle
+            echo "    externalNativeBuild {" >> app/build.gradle
+            echo "        cmake {" >> app/build.gradle
+            echo "            path \"src/main/jni/CMakeLists.txt\"" >> app/build.gradle
+            echo "            version \"3.10.2\"" >> app/build.gradle
+            echo "        }" >> app/build.gradle
+            echo "    }" >> app/build.gradle
+            echo "}" >> app/build.gradle
+            echo "" >> app/build.gradle
+            echo "dependencies {" >> app/build.gradle
+            echo "    implementation fileTree(dir: 'libs', include: ['*.jar'])" >> app/build.gradle
+            echo "}" >> app/build.gradle
+          fi
+        
+      - name: Create gradle.properties for arm64
+        run: |
+          echo "Создаем gradle.properties для arm64-v8a..."
+          echo "android.useDeprecatedNdk=true" > app/gradle.properties
+          echo "android.bundle.enableUncompressedNativeLibs=false" >> app/gradle.properties
+        
+      - name: Create Application.mk for arm64
+        run: |
+          echo "Создаем Application.mk для arm64-v8a..."
+          mkdir -p app/src/main/jni
+          echo "APP_ABI := arm64-v8a" > app/src/main/jni/Application.mk
+          echo "APP_PLATFORM := android-21" >> app/src/main/jni/Application.mk
+          echo "APP_STL := c++_static" >> app/src/main/jni/Application.mk
+          echo "APP_CPPFLAGS := -std=c++11 -frtti -fexceptions -Wno-error=unused-value -Wno-error=dangling-else" >> app/src/main/jni/Application.mk
+        
+      - name: Fix SDL1 to SDL2 compatibility issues
+        run: |
+          echo "Исправляем проблемы совместимости SDL1 и SDL2..."
+          cd app/src/main/jni/OpenXcom
           
-          echo "AndroidManifest из APK:"
-          apktool d -s "$APK_FILE" -o /tmp/apk_analysis 2>/dev/null
-          cat /tmp/apk_analysis/AndroidManifest.xml | grep -E "minSdkVersion|targetSdkVersion|versionCode|versionName|permission" || true
+          echo "Исправляем SDLKey на SDL_Keycode..."
+          find . -type f \( -name "*.h" -o -name "*.cpp" -o -name "*.hpp" -o -name "*.inc" \) -exec sed -i 's/SDLKey/SDL_Keycode/g' {} \;
           
-          # Проверяем архитектуру
-          echo "Архитектура библиотек:"
-          find /tmp/apk_analysis -name "*.so" -exec file {} \; | head -10 || echo "Библиотеки не найдены"
-        else
-          echo "APK файл не найден!"
-          find app/build -name "*.apk" -type f | xargs ls -la
-        fi
-        
-    - name: Build Release APK
-      run: |
-        echo "Собираем Release APK..."
-        
-        # Собираем Release APK с отладочной подписью
-        ./gradlew clean assembleRelease --no-daemon --stacktrace
-        
-    - name: Sign APK with debug keystore
-      run: |
-        echo "Подписываем APK debug-ключом для установки..."
-        
-        # Находим APK файл
-        APK_FILE=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
-        
-        if [ -f "$APK_FILE" ]; then
-          echo "Найден APK: $APK_FILE"
+          echo "Исправляем кнопки колесика мыши..."
+          find . -type f \( -name "*.cpp" -o -name "*.h" -o -name "*.c" \) -exec sed -i 's/SDL_BUTTON_WHEELUP/4/g' {} \;
+          find . -type f \( -name "*.cpp" -o -name "*.h" -o -name "*.c" \) -exec sed -i 's/SDL_BUTTON_WHEELDOWN/5/g' {} \;
           
+          echo "Исправляем SDL_WarpMouse..."
+          find . -type f \( -name "*.cpp" -o -name "*.h" -o -name "*.c" \) -exec sed -i 's/SDL_WarpMouse(/SDL_WarpMouseInWindow(NULL, /g' {} \;
           
+          echo "Проверяем исправления..."
+          echo "Найдены SDL_Keycode:"
+          grep -r "SDL_Keycode" . --include="*.cpp" --include="*.h" | wc -l
+        
+      - name: Fix warnings in BrutalAI
+        run: |
+          echo "Исправляем предупреждения компилятора..."
+          cd app/src/main/jni/OpenXcom
+          
+          echo "Восстанавливаем оригинальный макрос Log..."
+          if [ -f "src/Engine/Logger.h" ]; then
+            sed -i 's/#define Log(level) do { if (level <= Logger::reportingLevel()) { Logger().get(level); } } while (0)/#define Log(level) if (level > Logger::reportingLevel()) { } else Logger().get(level)/' src/Engine/Logger.h || true
+            echo "Logger.h восстановлен"
+          else
+            echo "Logger.h не найден"
+          fi
+          
+          echo "Закомментируем неиспользуемые значения в AIModule.cpp..."
+          if [ -f "src/Battlescape/AIModule.cpp" ]; then
+            sed -i '5032s/cost\[j\]\.Time;/\/\/ cost[j].Time;/' src/Battlescape/AIModule.cpp
+            sed -i '5033s/cost\[j\]\.Energy;/\/\/ cost[j].Energy;/' src/Battlescape/AIModule.cpp
+            echo "AIModule.cpp исправлен"
+          else
+            echo "AIModule.cpp не найден"
+          fi
+        
+      - name: Update gradle wrapper
+        run: |
+          echo "Обновляем Gradle wrapper до 4.10.3..."
+          if [ -f "gradle/wrapper/gradle-wrapper.properties" ]; then
+            sed -i 's/gradle-.*-bin.zip/gradle-4.10.3-bin.zip/' gradle/wrapper/gradle-wrapper.properties
+            echo "Gradle wrapper обновлен"
+          else
+            echo "gradle-wrapper.properties не найден, создаем..."
+            mkdir -p gradle/wrapper
+            echo "distributionBase=GRADLE_USER_HOME" > gradle/wrapper/gradle-wrapper.properties
+            echo "distributionPath=wrapper/dists" >> gradle/wrapper/gradle-wrapper.properties
+            echo "zipStoreBase=GRADLE_USER_HOME" >> gradle/wrapper/gradle-wrapper.properties
+            echo "zipStorePath=wrapper/dists" >> gradle/wrapper/gradle-wrapper.properties
+            echo "distributionUrl=https\://services.gradle.org/distributions/gradle-4.10.3-bin.zip" >> gradle/wrapper/gradle-wrapper.properties
+          fi
+        
+      - name: Build with Gradle
+        run: |
+          echo "Собираем APK с Gradle..."
+          
+          chmod +x gradlew
+          
+          echo "Проверяем Gradle конфигурацию..."
+          ./gradlew --version
+          
+          echo "Начинаем сборку APK..."
+          ./gradlew clean
+          
+          echo "Собираем Release APK для arm64-v8a..."
+          ./gradlew assembleRelease \
+            --no-daemon \
+            --stacktrace \
+            -Pandroid.injected.build.abi=arm64-v8a
+        
+      - name: Check build results
+        run: |
+          echo "Проверяем результаты сборки..."
+          if [ -d "app/build/outputs/apk" ]; then
+            echo "Найденные APK файлы:"
+            find app/build/outputs/apk -name "*.apk" -type f | xargs ls -la
+            
+            if [ $(find app/build/outputs/apk -name "*.apk" -type f | wc -l) -eq 0 ]; then
+              echo "ОШИБКА: APK файлы не собраны!"
+              echo "Содержимое app/build/outputs/apk:"
+              ls -la app/build/outputs/apk/
+              exit 1
+            fi
+          else
+            echo "ОШИБКА: Папка app/build/outputs/apk не существует!"
+            echo "Содержимое app/build:"
+            ls -la app/build/
+            exit 1
+          fi
+        
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BrutalAI-Android-APK-arm64
+          path: app/build/outputs/apk/**/*.apk
+          retention-days: 7
