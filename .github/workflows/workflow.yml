@@ -128,3 +128,4 @@ jobs:
       run: |
         echo "Собранные файлы:"
         find . -name "*.apk" -type f | xargs ls -la
+        
