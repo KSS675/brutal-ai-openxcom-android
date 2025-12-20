@@ -1,4 +1,4 @@
-name: Build BrutalAI Android APK
+name: Build BrutalAI Android APK (arm64 only)
 
 on:
   push:
@@ -95,14 +95,50 @@ jobs:
     - name: Configure build for arm64-v8a only
       run: |
         echo "Настраиваем сборку только для arm64-v8a..."
-        cd app
-        # Создаем gradle.properties для ограничения архитектур
-        echo "android.useDeprecatedNdk=true" > gradle.properties
-        echo "APP_ABI=arm64-v8a" >> gradle.properties
         
-        # Модифицируем build.gradle для arm64 только
-        sed -i '/ndk {/!b;n;c\            abiFilters "arm64-v8a"' build.gradle || true
-        cd ..
+        # Создаем gradle.properties в корне проекта
+        echo "android.useDeprecatedNdk=true" > gradle.properties
+        echo "android.bundle.enableUncompressedNativeLibs=false" >> gradle.properties
+        
+        # Модифицируем build.gradle для включения только arm64-v8a
+        if [ -f "app/build.gradle" ]; then
+          # Удаляем все существующие настройки abiFilters и добавляем только arm64-v8a
+          sed -i '/abiFilters/d' app/build.gradle
+          
+          # Добавляем настройки для NDK в defaultConfig
+          if grep -q "defaultConfig {" app/build.gradle; then
+            # Если defaultConfig уже существует, добавляем в него ndk блок
+            if ! grep -q "ndk {" app/build.gradle; then
+              sed -i '/defaultConfig {/a\        ndk {\n            abiFilters "arm64-v8a"\n        }' app/build.gradle
+            else
+              # Если ndk уже существует, добавляем abiFilters в него
+              sed -i '/ndk {/,/}/ s/}/            abiFilters "arm64-v8a"\n        }/' app/build.gradle
+            fi
+          fi
+          
+          # Также настраиваем splits для сборки только одного ABI
+          echo "" >> app/build.gradle
+          echo "android {" >> app/build.gradle
+          echo "    splits {" >> app/build.gradle
+          echo "        abi {" >> app/build.gradle
+          echo "            enable true" >> app/build.gradle
+          echo "            reset()" >> app/build.gradle
+          echo "            include 'arm64-v8a'" >> app/build.gradle
+          echo "            universalApk false" >> app/build.gradle
+          echo "        }" >> app/build.gradle
+          echo "    }" >> app/build.gradle
+          echo "}" >> app/build.gradle
+        fi
+        
+        # Создаем Application.mk для NDK сборки
+        if [ -d "app/src/main/jni" ]; then
+          echo "APP_ABI := arm64-v8a" > app/src/main/jni/Application.mk
+          echo "APP_PLATFORM := android-16" >> app/src/main/jni/Application.mk
+          echo "NDK_TOOLCHAIN_VERSION := 4.9" >> app/src/main/jni/Application.mk
+        fi
+        
+        echo "Проверяем конфигурацию build.gradle:"
+        grep -n "abiFilters\|splits\|ndk" app/build.gradle || true
         
     - name: Fix SDL1 to SDL2 compatibility issues
       run: |
@@ -176,9 +212,9 @@ jobs:
           echo "build.gradle не найден"
         fi
         
-    - name: Build with Gradle 4.10.3
+    - name: Build with Gradle 4.10.3 (arm64 only)
       run: |
-        echo "Собираем APK с Gradle 4.10.3..."
+        echo "Собираем APK с Gradle 4.10.3 только для arm64..."
         
         # Устанавливаем конкретную версию Gradle wrapper
         sed -i 's/gradle-.*-bin.zip/gradle-4.10.3-bin.zip/' gradle/wrapper/gradle-wrapper.properties
@@ -186,13 +222,34 @@ jobs:
         # Даем права на выполнение
         chmod +x gradlew
         
-        # Собираем Release APK
-        ./gradlew clean assembleRelease --no-daemon --stacktrace
+        # Собираем Release APK только для arm64-v8a
+        ./gradlew clean assembleRelease -PabiFilters=arm64-v8a --no-daemon --stacktrace
+        
+        # Альтернативный вариант с явным указанием ABI
+        # ./gradlew clean assembleArm64-v8aRelease --no-daemon --stacktrace
+        
+    - name: Verify ABI in APK
+      run: |
+        echo "Проверяем архитектуры в собранном APK..."
+        if ls app/build/outputs/apk/release/*.apk 1> /dev/null 2>&1; then
+          for apk in app/build/outputs/apk/release/*.apk; do
+            echo "Анализируем APK: $(basename $apk)"
+            # Используем aapt для проверки библиотек
+            if command -v $ANDROID_HOME/build-tools/28.0.3/aapt > /dev/null 2>&1; then
+              $ANDROID_HOME/build-tools/28.0.3/aapt list $apk | grep -E "lib/.*\.so" | sort | uniq
+            else
+              unzip -l $apk | grep -E "lib/.*\.so" | sort | uniq
+            fi
+            echo ""
+          done
+        else
+          echo "APK файлы не найдены!"
+        fi
         
     - name: Upload APK artifact
       uses: actions/upload-artifact@v4
       with:
-        name: BrutalAI-Android-APK
+        name: BrutalAI-Android-APK-arm64
         path: app/build/outputs/apk/release/*.apk
         retention-days: 7
         
@@ -200,3 +257,6 @@ jobs:
       run: |
         echo "Собранные файлы:"
         find . -name "*.apk" -type f | xargs ls -la
+        echo ""
+        echo "Размер APK файлов:"
+        find . -name "*.apk" -type f -exec du -h {} \;
