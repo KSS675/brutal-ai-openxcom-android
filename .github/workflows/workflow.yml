@@ -89,120 +89,75 @@ jobs:
           echo "Создаем local.properties..."
           echo "sdk.dir=$ANDROID_HOME" > local.properties
           echo "ndk.dir=$ANDROID_NDK_HOME" >> local.properties
-          echo "Содержимое local.properties:"
-          echo "sdk.dir=$ANDROID_HOME"
-          echo "ndk.dir=$ANDROID_NDK_HOME"
         
-      - name: Fix app/build.gradle syntax
+      - name: Create app/build.gradle
         run: |
-          echo "Исправляем синтаксис build.gradle..."
+          echo "Создаем новый build.gradle с правильным синтаксисом..."
+          mkdir -p app
+          
+          echo "apply plugin: 'com.android.application'" > app/build.gradle
+          echo "" >> app/build.gradle
+          echo "android {" >> app/build.gradle
+          echo "    compileSdkVersion 28" >> app/build.gradle
+          echo "    buildToolsVersion \"28.0.3\"" >> app/build.gradle
+          echo "" >> app/build.gradle
+          echo "    defaultConfig {" >> app/build.gradle
+          echo "        applicationId \"org.openxcom\"" >> app/build.gradle
+          echo "        minSdkVersion 16" >> app/build.gradle
+          echo "        targetSdkVersion 28" >> app/build.gradle
+          echo "        versionCode 1" >> app/build.gradle
+          echo "        versionName \"1.0\"" >> app/build.gradle
+          echo "        ndk {" >> app/build.gradle
+          echo "            abiFilters \"arm64-v8a\"" >> app/build.gradle
+          echo "        }" >> app/build.gradle
+          echo "    }" >> app/build.gradle
+          echo "" >> app/build.gradle
+          echo "    buildTypes {" >> app/build.gradle
+          echo "        release {" >> app/build.gradle
+          echo "            minifyEnabled false" >> app/build.gradle
+          echo "            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'" >> app/build.gradle
+          echo "        }" >> app/build.gradle
+          echo "    }" >> app/build.gradle
+          echo "" >> app/build.gradle
+          echo "    externalNativeBuild {" >> app/build.gradle
+          echo "        cmake {" >> app/build.gradle
+          echo "            path \"src/main/jni/CMakeLists.txt\"" >> app/build.gradle
+          echo "            version \"3.10.2\"" >> app/build.gradle
+          echo "        }" >> app/build.gradle
+          echo "    }" >> app/build.gradle
+          echo "}" >> app/build.gradle
+          echo "" >> app/build.gradle
+          echo "dependencies {" >> app/build.gradle
+          echo "    implementation fileTree(dir: 'libs', include: ['*.jar'])" >> app/build.gradle
+          echo "}" >> app/build.gradle
+        
+      - name: Validate build.gradle
+        run: |
+          echo "Проверяем файл build.gradle..."
           if [ -f "app/build.gradle" ]; then
-            echo "Создаем резервную копию build.gradle..."
-            cp app/build.gradle app/build.gradle.backup
+            echo "Файл существует. Количество строк:"
+            wc -l app/build.gradle
+            echo "Последние 10 строк файла:"
+            tail -10 app/build.gradle
+            echo "Проверка синтаксиса..."
             
-            echo "Проверяем текущий build.gradle..."
-            echo "=== Первые 30 строк build.gradle ==="
-            head -30 app/build.gradle
-            echo "==================================="
+            OPEN_BRACES=$(grep -o "{" app/build.gradle | wc -l)
+            CLOSE_BRACES=$(grep -o "}" app/build.gradle | wc -l)
             
-            echo "Исправляем синтаксис..."
+            echo "Открывающих скобок { : $OPEN_BRACES"
+            echo "Закрывающих скобок } : $CLOSE_BRACES"
             
-            if ! grep -q "android {" app/build.gradle; then
-              echo "Создаем новый build.gradle с правильным синтаксисом..."
-              echo "apply plugin: 'com.android.application'" > app/build.gradle
-              echo "" >> app/build.gradle
-              echo "android {" >> app/build.gradle
-              echo "    compileSdkVersion 28" >> app/build.gradle
-              echo "    buildToolsVersion \"28.0.3\"" >> app/build.gradle
-              echo "" >> app/build.gradle
-              echo "    defaultConfig {" >> app/build.gradle
-              echo "        applicationId \"org.openxcom\"" >> app/build.gradle
-              echo "        minSdkVersion 16" >> app/build.gradle
-              echo "        targetSdkVersion 28" >> app/build.gradle
-              echo "        versionCode 1" >> app/build.gradle
-              echo "        versionName \"1.0\"" >> app/build.gradle
-              echo "" >> app/build.gradle
-              echo "        ndk {" >> app/build.gradle
-              echo "            abiFilters \"arm64-v8a\"" >> app/build.gradle
-              echo "        }" >> app/build.gradle
-              echo "    }" >> app/build.gradle
-              echo "" >> app/build.gradle
-              echo "    buildTypes {" >> app/build.gradle
-              echo "        release {" >> app/build.gradle
-              echo "            minifyEnabled false" >> app/build.gradle
-              echo "            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'" >> app/build.gradle
-              echo "        }" >> app/build.gradle
-              echo "    }" >> app/build.gradle
-              echo "" >> app/build.gradle
-              echo "    externalNativeBuild {" >> app/build.gradle
-              echo "        cmake {" >> app/build.gradle
-              echo "            path \"src/main/jni/CMakeLists.txt\"" >> app/build.gradle
-              echo "            version \"3.10.2\"" >> app/build.gradle
-              echo "        }" >> app/build.gradle
-              echo "    }" >> app/build.gradle
-              echo "}" >> app/build.gradle
-              echo "" >> app/build.gradle
-              echo "dependencies {" >> app/build.gradle
-              echo "    implementation fileTree(dir: 'libs', include: ['*.jar'])" >> app/build.gradle
-              echo "}" >> app/build.gradle
+            if [ "$OPEN_BRACES" -eq "$CLOSE_BRACES" ]; then
+              echo "✓ Баланс скобок правильный"
             else
-              echo "Используем существующий build.gradle, добавляем настройки arm64..."
-              if ! grep -q "ndk {" app/build.gradle; then
-                echo "Добавляем блок ndk в defaultConfig..."
-                TEMP_FILE=$(mktemp)
-                awk '/defaultConfig {/,/}/ {
-                  if ($0 ~ /}/) {
-                    print "        ndk {"
-                    print "            abiFilters \"arm64-v8a\""
-                    print "        }"
-                  }
-                  print
-                } !/defaultConfig {/,/}/' app/build.gradle > "$TEMP_FILE"
-                mv "$TEMP_FILE" app/build.gradle
-              fi
+              echo "✗ ОШИБКА: Несовпадение скобок!"
+              echo "Содержимое build.gradle:"
+              cat app/build.gradle
+              exit 1
             fi
-            
-            echo "=== Исправленный build.gradle (первые 40 строк) ==="
-            head -40 app/build.gradle
           else
-            echo "app/build.gradle не найден, создаем новый..."
-            mkdir -p app
-            echo "apply plugin: 'com.android.application'" > app/build.gradle
-            echo "" >> app/build.gradle
-            echo "android {" >> app/build.gradle
-            echo "    compileSdkVersion 28" >> app/build.gradle
-            echo "    buildToolsVersion \"28.0.3\"" >> app/build.gradle
-            echo "" >> app/build.gradle
-            echo "    defaultConfig {" >> app/build.gradle
-            echo "        applicationId \"org.openxcom\"" >> app/build.gradle
-            echo "        minSdkVersion 16" >> app/build.gradle
-            echo "        targetSdkVersion 28" >> app/build.gradle
-            echo "        versionCode 1" >> app/build.gradle
-            echo "        versionName \"1.0\"" >> app/build.gradle
-            echo "" >> app/build.gradle
-            echo "        ndk {" >> app/build.gradle
-            echo "            abiFilters \"arm64-v8a\"" >> app/build.gradle
-            echo "        }" >> app/build.gradle
-            echo "    }" >> app/build.gradle
-            echo "" >> app/build.gradle
-            echo "    buildTypes {" >> app/build.gradle
-            echo "        release {" >> app/build.gradle
-            echo "            minifyEnabled false" >> app/build.gradle
-            echo "            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'" >> app/build.gradle
-            echo "        }" >> app/build.gradle
-            echo "    }" >> app/build.gradle
-            echo "" >> app/build.gradle
-            echo "    externalNativeBuild {" >> app/build.gradle
-            echo "        cmake {" >> app/build.gradle
-            echo "            path \"src/main/jni/CMakeLists.txt\"" >> app/build.gradle
-            echo "            version \"3.10.2\"" >> app/build.gradle
-            echo "        }" >> app/build.gradle
-            echo "    }" >> app/build.gradle
-            echo "}" >> app/build.gradle
-            echo "" >> app/build.gradle
-            echo "dependencies {" >> app/build.gradle
-            echo "    implementation fileTree(dir: 'libs', include: ['*.jar'])" >> app/build.gradle
-            echo "}" >> app/build.gradle
+            echo "ОШИБКА: Файл app/build.gradle не найден!"
+            exit 1
           fi
         
       - name: Create gradle.properties for arm64
@@ -293,6 +248,7 @@ jobs:
           ./gradlew assembleRelease \
             --no-daemon \
             --stacktrace \
+            --info \
             -Pandroid.injected.build.abi=arm64-v8a
         
       - name: Check build results
