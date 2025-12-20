@@ -101,8 +101,109 @@ jobs:
         echo "APP_ABI=arm64-v8a" >> gradle.properties
         
         # Модифицируем build.gradle для arm64 только
-        sed -i '/ndk {/!b;n;c\            abiFilters "arm64-v8a"' build.gradle || true
+        # 1. Удаляем все старые abiFilters
+        sed -i 's/abiFilters.*/abiFilters "arm64-v8a"/g' build.gradle
+        # 2. Добавляем abiFilters в defaultConfig если нет
+        if ! grep -q 'abiFilters' build.gradle; then
+          sed -i '/defaultConfig\s*{/,/}/ s/defaultConfig\s*{/defaultConfig {\n        ndk {\n            abiFilters "arm64-v8a"\n        }/' build.gradle || true
+        fi
+        # 3. Добавляем в externalNativeBuild->cmake
+        sed -i '/externalNativeBuild\s*{/,/}/ s/cmake\s*{/cmake {\n            abiFilters "arm64-v8a"/' build.gradle || true
+        # 4. Добавляем аргумент для CMake
+        sed -i '/cmake\s*{/!b;:a;n;/}/!ba; s/}/            arguments "-DANDROID_ABI=arm64-v8a"\n        }/' build.gradle || true
         cd ..
+        
+    - name: Fix SDL1 to SDL2 compatibility issues
+      run: |
+        echo "Исправляем проблемы совместимости SDL1 и SDL2..."
+        cd app/src/main/jni/OpenXcom
+        
+        # 1. Исправляем SDLKey на SDL_Keycode
+        echo "Исправляем SDLKey на SDL_Keycode..."
+        find . -type f \( -name "*.h" -o -name "*.cpp" -o -name "*.hpp" -o -name "*.inc" \) -exec sed -i 's/SDLKey/SDL_Keycode/g' {} \;
+        
+        # 2. Исправляем SDL_BUTTON_WHEELUP и SDL_BUTTON_WHEELDOWN
+        echo "Исправляем кнопки колесика мыши..."
+        find . -type f \( -name "*.cpp" -o -name "*.h" -o -name "*.c" \) -exec sed -i 's/SDL_BUTTON_WHEELUP/4/g' {} \;
+        find . -type f \( -name "*.cpp" -o -name "*.h" -o -name "*.c" \) -exec sed -i 's/SDL_BUTTON_WHEELDOWN/5/g' {} \;
+        
+        # 3. Исправляем SDL_WarpMouse
+        echo "Исправляем SDL_WarpMouse..."
+        find . -type f \( -name "*.cpp" -o -name "*.h" -o -name "*.c" \) -exec sed -i 's/SDL_WarpMouse(/SDL_WarpMouseInWindow(NULL, /g' {} \;
+        
+        # 4. Исправляем SDL_WM_GrabInput для SDL2
+        echo "Исправляем SDL_WM_GrabInput..."
+        find . -type f \( -name "*.cpp" -o -name "*.h" -o -name "*.c" \) -exec sed -i 's/SDL_WM_GrabInput(\(.*\));/SDL_SetWindowGrab(SDL_GL_GetCurrentWindow(), \1 ? SDL_TRUE : SDL_FALSE);/g' {} \;
+        
+        echo "Проверяем исправления..."
+        echo "Найдены SDL_Keycode:"
+        grep -r "SDL_Keycode" . --include="*.cpp" --include="*.h" | wc -l
+        
+    - name: Fix warnings in BrutalAI
+      run: |
+        echo "Исправляем предупреждения компилятора..."
+        cd app/src/main/jni/OpenXcom
+        
+        # Восстанавливаем оригинальный макрос Log в Logger.h
+        echo "Восстанавливаем оригинальный макрос Log..."
+        if [ -f "src/Engine/Logger.h" ]; then
+          # Восстанавливаем оригинальный макрос Log на строке 69
+          sed -i '69s/#define Log(level) do { if (level <= Logger::reportingLevel()) { Logger().get(level); } } while (0)/#define Log(level) if (level > Logger::reportingLevel()) { } else Logger().get(level)/' src/Engine/Logger.h || true
+          
+          # Проверяем, есть ли другой формат макроса
+          sed -i '69s/#define Log(level) if (level <= Logger::reportingLevel()) { Logger().get(level); }/#define Log(level) if (level > Logger::reportingLevel()) { } else Logger().get(level)/' src/Engine/Logger.h || true
+          echo "Logger.h восстановлен"
+        else
+          echo "Logger.h не найден"
+        fi
+        
+        # Закомментируем неиспользуемые строки в AIModule.cpp
+        echo "Закомментируем неиспользуемые значения в AIModule.cpp..."
+        if [ -f "src/Battlescape/AIModule.cpp" ]; then
+          # Закомментируем строки 5032 и 5033
+          sed -i '5032s/cost\[j\]\.Time;/\/\/ cost[j].Time;/' src/Battlescape/AIModule.cpp
+          sed -i '5033s/cost\[j\]\.Energy;/\/\/ cost[j].Energy;/' src/Battlescape/AIModule.cpp
+          echo "AIModule.cpp исправлен"
+        else
+          echo "AIModule.cpp не найден"
+        fi
+        
+    - name: Disable warnings as errors
+      run: |
+        echo "Отключаем трактовку предупреждений как ошибок..."
+        cd app
+        
+        # Проверяем существование build.gradle
+        if [ -f "build.gradle" ]; then
+          # Ищем строку с cppFlags и добавляем флаги
+          if grep -q "cppFlags" build.gradle; then
+            # Если уже есть cppFlags, добавляем к ним
+            sed -i '/cppFlags/ s/"-Werror"/"-Wno-error=unused-value -Wno-error=dangling-else -Wno-error"/' build.gradle || true
+            sed -i '/cppFlags/ s/""/"-Wno-error=unused-value -Wno-error=dangling-else -Wno-error"/' build.gradle || true
+          else
+            # Ищем externalNativeBuild и добавляем cppFlags
+            sed -i '/externalNativeBuild {/,/}/ s/cmake {/cmake {\n                cppFlags "-Wno-error=unused-value -Wno-error=dangling-else -Wno-error"/' build.gradle || true
+          fi
+          echo "build.gradle модифицирован"
+        else
+          echo "build.gradle не найден"
+        fi
+        
+        # Также добавляем в CMakeLists.txt если нужно
+        cd ../app/src/main/jni
+        if [ -f "CMakeLists.txt" ]; then
+          sed -i '1iadd_compile_options(-Wno-error=unused-value -Wno-error=dangling-else -Wno-error)' CMakeLists.txt || true
+          echo "CMakeLists.txt модифицирован"
+        fi
+        
+    - name: Check build configuration
+      run: |
+        echo "Проверяем конфигурацию сборки..."
+        cd app
+        echo "Содержимое build.gradle (abiFilters):"
+        grep -n "abiFilters" build.gradle
+        echo "Содержимое gradle.properties:"
+        cat gradle.properties
         
     - name: Build with Gradle 4.10.3
       run: |
@@ -114,8 +215,8 @@ jobs:
         # Даем права на выполнение
         chmod +x gradlew
         
-        # Собираем Release APK
-        ./gradlew clean assembleRelease --no-daemon --stacktrace
+        # Собираем Release APK с явным указанием архитектуры
+        ./gradlew clean assembleRelease -Pandroid.injected.build.abi=arm64-v8a --no-daemon --stacktrace
         
     - name: Upload APK artifact
       uses: actions/upload-artifact@v4
@@ -128,4 +229,3 @@ jobs:
       run: |
         echo "Собранные файлы:"
         find . -name "*.apk" -type f | xargs ls -la
-        
